@@ -1,0 +1,31 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: 1.6.43
+
+      - run: npm install
+
+      # The committed bundle must match src/. If this leaves the tree dirty,
+      # someone edited resources/git-sandbox.js by hand or forgot to rebuild.
+      - name: Check the generated bundle is up to date
+        run: |
+          ./build.sh
+          git diff --exit-code -- _extensions/git-sandbox/resources/git-sandbox.js
+
+      - run: ./tests/run.sh

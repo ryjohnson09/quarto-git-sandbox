@@ -1,0 +1,259 @@
+---
+title: "Version control with Git"
+subtitle: "Track your work, try things safely, and keep a history you can explain"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-title: "In this lesson"
+    embed-resources: true
+    include-in-header:
+      text: |
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;700&family=Source+Code+Pro:wght@400&display=swap" rel="stylesheet">
+filters:
+  - git-sandbox
+---
+
+## Why we version our work
+
+Every analysis reaches the point where someone asks a question the files
+alone cannot answer. Which version produced the number in the deck? What
+did we change after the review? Can we get back to Friday's model without
+undoing Monday's fix?
+
+Git answers those questions by recording your project as a series of
+snapshots you choose to keep. Each snapshot carries a message explaining
+why you made it. That history is what turns a folder of files into work
+you can hand to a colleague, revisit in a year, or safely experiment on.
+
+This lesson covers the loop you will use every day: save a version, look
+at the history, branch off to try something, and bring it back. We work in
+R and Python examples here, but Git does not care what is in your files —
+the same commands cover notebooks, Quarto documents, SQL, and Dockerfiles.
+
+::: {.callout-note appearance="simple"}
+### About the exercises
+
+Each exercise below is a real Git repository running inside this page.
+Nothing is installed, nothing is uploaded, and nothing touches your
+computer — when you reload or press **Reset**, the repository goes away.
+
+Type commands at the prompt and press Enter. The panel on the right shows
+where your files currently live and what your history looks like, so you
+can watch each command take effect. Type `help` to see what the sandbox
+supports, and use the up arrow to repeat a previous command.
+:::
+
+## Saving your first version
+
+Three commands do almost all of the work.
+
+`git init` tells Git to start tracking a folder. It creates a hidden
+`.git` directory that holds the history; your own files are untouched.
+
+`git add` chooses what goes into the next snapshot. This step surprises
+people at first — why not just save everything? Because a working session
+usually mixes several things: the fix you want to record, a debugging
+print statement you do not, and a data file you should never commit. `git
+add` is where you draw that line.
+
+`git commit` writes the snapshot, with a message. A good message finishes
+the sentence "this commit will…" — *add the regional breakdown*, *fix the
+date parsing in the loader*.
+
+Between them, `git status` tells you where you stand. Run it often; it is
+the cheapest command in Git and it always tells you what to do next.
+
+```git-sandbox
+id: first-commit
+title: Exercise 1 — your first commit
+prompt: "~/sales-analysis $"
+intro: |
+  You have an empty project folder. Nothing is tracked yet.
+  Type {y}help{/} to see the available commands.
+hints: [git init, git status, 'echo "# Sales analysis" > README.md', git add README.md, 'git commit -m "Add the project README"', git log --oneline]
+done-note: Edit, stage, commit — you will repeat that loop for the rest of your career.
+tasks:
+  - text: Start tracking this folder with `git init`
+    when: repo
+  - text: 'Create a file, for example `echo "# Sales analysis" > README.md`'
+    when: file README.md
+  - text: Check where you stand with `git status`
+    when: ran /^\s*git\s+status/
+  - text: Stage the file with `git add`
+    when: staged or commits >= 1
+  - text: Record it with `git commit -m "your message"`
+    when: commits >= 1
+  - text: Change the file and commit a second version
+    when: commits >= 2
+```
+
+## The three places your work lives
+
+The diagram in the exercise is not decoration — it is the mental model
+that makes Git click.
+
+Your **working directory** is the folder you actually edit. Git watches it
+but does not record anything on its own.
+
+The **staging area** is the snapshot you are assembling. `git add` copies
+the current contents of a file into it. This is why editing a file *after*
+you stage it leaves that file in both columns: Git is holding the version
+you staged, and separately noticing that the file on disk has moved on.
+
+The **repository** is the permanent history. `git commit` takes whatever
+is in the staging area and writes it there under a new commit ID. Once
+work is committed, it is very hard to lose.
+
+Two commands read that history back to you. `git log --oneline` lists
+commits newest first, and `git diff` shows what has changed in your
+working directory since the last commit — worth running before every
+commit, as a last look at what you are about to record.
+
+## Trying something without breaking anything
+
+So far the history is a straight line. Branches let it fork.
+
+A branch is a movable label pointing at a commit. Creating one costs
+nothing and copies nothing; `git checkout -b report` simply makes a new
+label at your current commit and points `HEAD` — your current position —
+at it. Commits you make now extend the branch and leave `main` exactly
+where it was.
+
+This is what makes Git worth learning. You can restructure a model, try a
+different chart library, or rewrite a section of a report, and if it does
+not work out you switch back to `main` and the experiment simply is not
+part of the story. When you switch branches, Git rewrites the files in
+your working directory to match — so the folder always reflects the branch
+you are on.
+
+```git-sandbox
+id: branching
+title: Exercise 2 — work on a branch
+prompt: "~/sales-analysis $"
+intro: |
+  This project already has some history. Run {y}git log --oneline{/} to see it.
+  Your job: draft a report on a branch, then bring it back to {y}main{/}.
+hints: [git log --oneline, git checkout -b report, git branch, 'echo "# Q3 findings" > report.qmd', git add ., 'git commit -m "Draft the Q3 report"', git checkout main, git merge report]
+done-note: Because main had not moved, Git just slid the label forward. That is a fast-forward merge.
+seed: |
+  git init
+  echo "# Sales analysis" > README.md
+  git add .
+  git commit -m "Add the project README"
+  echo "library(tidyverse)" > analysis.R
+  git add .
+  git commit -m "Start the analysis script"
+tasks:
+  - text: Create a branch called `report` and switch to it, with `git checkout -b report`
+    when: branch report
+  - text: Make at least one commit on `report`
+    when: commits on report >= 3
+  - text: Switch back to `main` and notice your new file is gone from `ls`
+    when: ran /^\s*git\s+(checkout|switch)\s+main\s*$/
+  - text: Bring the work across with `git merge report`
+    when: on main and merged report into main
+```
+
+## Bringing work back together
+
+`git merge` combines two lines of work. What it does depends on whether
+the branch you are merging into has moved.
+
+If `main` has not moved since you branched, there is nothing to reconcile.
+Git just slides the `main` label forward to your branch's commit. That is
+a **fast-forward**, and it is what you saw above — the history stays a
+straight line.
+
+If `main` *has* moved — a colleague merged something, or you pushed a
+hotfix — the two branches have genuinely diverged. Git combines both sets
+of changes and records a **merge commit**, the one commit in your history
+with two parents. In the graph it is the point where two lanes come back
+together, and it is a useful marker: it tells you exactly when a piece of
+work joined the mainline.
+
+Git merges different files, and different regions of the same file,
+without help. It asks you to intervene only when two branches changed the
+same lines — a merge conflict. Conflicts are normal, not a sign you did
+something wrong, and they are the subject of the next lesson.
+
+```git-sandbox
+id: merging
+title: Exercise 3 — a real merge
+prompt: "~/sales-analysis $"
+intro: |
+  A colleague has been working on the {y}forecast{/} branch while you fix things on {y}main{/}.
+  Run {y}git log --oneline{/} on each branch, then merge them and watch the graph.
+hints: [git branch, git log --oneline, 'echo "fixed" > hotfix.md', git add ., 'git commit -m "Fix the date parsing"', git merge forecast, git branch -d forecast]
+done-note: Two lanes, one merge commit. That shape is the whole story of how the work came together.
+seed: |
+  git init
+  echo "# Sales analysis" > README.md
+  git add .
+  git commit -m "Add the project README"
+  git checkout -b forecast
+  echo "arima(sales)" > forecast.R
+  git add .
+  git commit -m "Add a first forecast model"
+  echo "tune the model" >> forecast.R
+  git add .
+  git commit -m "Tune the forecast parameters"
+  git checkout main
+tasks:
+  - text: Commit a change on `main` so the two branches diverge
+    when: commits on main >= 2 and not merged main into forecast
+  - text: Merge `forecast` into `main`
+    when: on main and merged forecast into main
+  - text: Confirm the history now contains a merge commit with two parents
+    when: merge commit
+  - text: 'Tidy up: delete the merged branch with `git branch -d forecast`'
+    when: not branch forecast and ran /git\s+branch\s+-[dD]/
+```
+
+## Command reference
+
+| Command | What it does |
+|---|---|
+| `git init` | Start tracking the current folder |
+| `git status` | Show what has changed and what is staged |
+| `git add <file>` | Stage a file for the next commit |
+| `git add .` | Stage every change in the folder |
+| `git commit -m "…"` | Record the staged changes as a new commit |
+| `git log --oneline` | List the history, newest first |
+| `git diff` | Show unstaged changes since the last commit |
+| `git branch` | List branches; `git branch <name>` creates one |
+| `git checkout -b <name>` | Create a branch and switch to it |
+| `git checkout <name>` | Switch to an existing branch |
+| `git merge <name>` | Merge a branch into the current one |
+| `git branch -d <name>` | Delete a branch you have already merged |
+
+: {tbl-colwidths="[36,64]"}
+
+## Where to go next
+
+Everything so far happens on one machine. The next lesson adds a remote —
+a shared copy on GitHub, GitLab, or an internal server — and the two
+commands that keep it in step, `git push` and `git pull`. That is the
+point where version control becomes collaboration, and where pull requests
+and code review fit in.
+
+Three habits are worth starting now:
+
+**Commit small and often.** A commit that changes one thing is a commit
+you can understand, revert, or explain a year from now.
+
+**Write messages for the next reader.** That reader is usually you.
+
+**Keep data and secrets out of the repository.** A `.gitignore` file
+tells Git what to leave alone — credentials, large data files, rendered
+output. Getting this right at the start of a project saves considerable
+trouble later.
+
+Finally, you do not have to work at the command line. The Git pane in
+RStudio and the Source Control view in Positron run these same commands
+behind buttons, and the concepts you learned here — staging, committing,
+branching, merging — are exactly what those buttons do. Learning the
+commands first means the interface makes sense rather than the other way
+round.

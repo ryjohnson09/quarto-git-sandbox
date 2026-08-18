@@ -1,0 +1,23 @@
+---
+title: "Condition errors"
+format: html
+filters:
+  - git-sandbox
+---
+
+The options here are well-formed, so the exercise renders — but two of the
+conditions cannot be read. Those tasks should say so in place.
+
+```git-sandbox
+id: broken-conditions
+title: Broken conditions
+tasks:
+  - text: This one is fine
+    when: repo
+  - text: This condition has a typo
+    when: frobnicate
+  - text: This condition is incomplete
+    when: commits >=
+  - text: This one uses the js escape hatch
+    js: c.isRepo === false
+```

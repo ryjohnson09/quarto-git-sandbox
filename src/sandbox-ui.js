@@ -1,0 +1,532 @@
+/* ------------------------------------------------------------------
+   git sandbox UI: terminal + staging diagram + commit graph.
+   Depends on window.GitSandboxCore and window.git (isomorphic-git UMD).
+   ------------------------------------------------------------------ */
+(function (root) {
+  'use strict';
+
+  var LANE_COLORS = ['#447099', '#419599', '#72994E', '#9A4665', '#EE6331', '#3276B5'];
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // {g} green {r} red {y} yellow {b} blue {w} bold {/} reset
+  function markup(s) {
+    var map = { g: 'tg', r: 'tr', y: 'ty', b: 'tb', w: 'tw' };
+    var out = esc(s);
+    out = out.replace(/\{([grybw])\}/g, function (_m, k) { return '<span class="' + map[k] + '">'; });
+    out = out.replace(/\{\/\}/g, '</span>');
+    return out;
+  }
+
+  /* --------------------- config normalisation ------------------------ */
+
+  // Authors can describe a task three ways:
+  //   check: async (c) => ...     a JavaScript predicate (hand-written qmd)
+  //   when:  'commits >= 2'       the declarative mini-language (extension)
+  //   js:    'c.isRepo'           an escape hatch for the extension
+  // Normalise all three to a `check` function, recording any compile error so
+  // it can be shown in place instead of failing silently.
+  function normaliseTasks(tasks) {
+    var W = root.GitSandboxWhen;
+    return (tasks || []).map(function (t) {
+      var task = { text: t.text, _done: false, _error: null, _files: [] };
+      if (typeof t.check === 'function') {
+        task.check = t.check;
+        return task;
+      }
+      if (!W) {
+        task._error = 'the `when:` compiler is not loaded';
+        task.check = function () { return false; };
+        return task;
+      }
+      try {
+        if (typeof t.when === 'string' && t.when.trim() !== '') {
+          task._files = W.filesNeeded(t.when);
+          var pred = W.compileWhen(t.when);
+          task.check = function (ctx) { return pred(ctx); };
+        } else if (typeof t.js === 'string' && t.js.trim() !== '') {
+          var jsPred = W.compileJs(t.js);
+          task.check = function (ctx) { return jsPred(ctx); };
+        } else {
+          throw new Error('a task needs one of `when:`, `js:` or a `check` function');
+        }
+      } catch (e) {
+        task._error = e.message;
+        task.check = function () { return false; };
+      }
+      return task;
+    });
+  }
+
+  // `seed` may be a function or a block of commands from YAML.
+  function normaliseSeed(seed) {
+    if (!seed) return null;
+    if (typeof seed === 'function') return seed;
+    var lines = String(seed).split('\n')
+      .map(function (l) { return l.trim(); })
+      .filter(function (l) { return l !== '' && l.charAt(0) !== '#'; });
+    if (!lines.length) return null;
+    return async function (sb) {
+      for (var i = 0; i < lines.length; i++) {
+        var r = await sb.run(lines[i]);
+        if (!r.ok) {
+          // A broken seed is an authoring bug, so make it loud rather than
+          // leaving the learner in a half-built repository.
+          throw new Error('seed command failed: ' + lines[i] + ' — ' + String(r.out).split('\n')[0]);
+        }
+      }
+    };
+  }
+
+  function normaliseIntro(intro) {
+    if (!intro) return [];
+    if (Array.isArray(intro)) return intro;
+    return String(intro).replace(/\n$/, '').split('\n');
+  }
+
+  function el(tag, cls, html) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html != null) n.innerHTML = html;
+    return n;
+  }
+
+  /* --------------------------- commit graph -------------------------- */
+
+  function renderGraph(svg, model) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var NS = 'http://www.w3.org/2000/svg';
+
+    if (!model.commits.length) {
+      svg.setAttribute('viewBox', '0 0 300 60');
+      svg.setAttribute('height', '60');
+      var t = document.createElementNS(NS, 'text');
+      t.setAttribute('x', '12'); t.setAttribute('y', '34');
+      t.setAttribute('class', 'gs-empty-text');
+      t.textContent = 'No commits yet.';
+      svg.appendChild(t);
+      return;
+    }
+
+    var rowH = 44, laneW = 24, padTop = 26, padLeft = 22;
+    var maxLane = 0;
+    model.commits.forEach(function (c) { if (c.lane > maxLane) maxLane = c.lane; });
+    var graphW = padLeft + maxLane * laneW + 22;
+    var width = 640;
+    var height = padTop + model.commits.length * rowH;
+
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    svg.setAttribute('height', String(height));
+    svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+
+    var index = {};
+    model.commits.forEach(function (c, i) { index[c.oid] = i; });
+    var x = function (lane) { return padLeft + lane * laneW; };
+    var y = function (i) { return padTop + i * rowH - rowH / 2 + 8; };
+
+    // edges first so nodes sit on top
+    model.commits.forEach(function (c, i) {
+      (c.parents || []).forEach(function (p, pi) {
+        if (!(p in index)) return;
+        var j = index[p];
+        var x1 = x(c.lane), y1 = y(i), x2 = x(model.commits[j].lane), y2 = y(j);
+        var path = document.createElementNS(NS, 'path');
+        var d;
+        if (x1 === x2) {
+          d = 'M' + x1 + ',' + y1 + ' L' + x2 + ',' + y2;
+        } else {
+          var mid = y1 + (y2 - y1) * 0.55;
+          d = 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + mid + ' ' + x2 + ',' + (y2 - (y2 - y1) * 0.45) + ' ' + x2 + ',' + y2;
+        }
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', LANE_COLORS[(pi === 0 ? c.lane : model.commits[j].lane) % LANE_COLORS.length]);
+        path.setAttribute('stroke-width', '2');
+        path.setAttribute('opacity', '0.55');
+        svg.appendChild(path);
+      });
+    });
+
+    model.commits.forEach(function (c, i) {
+      var cx = x(c.lane), cy = y(i);
+      var isMerge = (c.parents || []).length > 1;
+
+      var circle = document.createElementNS(NS, 'circle');
+      circle.setAttribute('cx', cx); circle.setAttribute('cy', cy);
+      circle.setAttribute('r', isMerge ? 7 : 6);
+      circle.setAttribute('fill', isMerge ? '#FFFFFF' : LANE_COLORS[c.lane % LANE_COLORS.length]);
+      circle.setAttribute('stroke', LANE_COLORS[c.lane % LANE_COLORS.length]);
+      circle.setAttribute('stroke-width', isMerge ? '3' : '2');
+      svg.appendChild(circle);
+
+      var tx = graphW + 6;
+
+      // ref pills
+      (c.refs || []).forEach(function (r) {
+        var label = (r.isHead ? 'HEAD → ' : '') + r.name;
+        var w = label.length * 6.6 + 14;
+        var rect = document.createElementNS(NS, 'rect');
+        rect.setAttribute('x', tx); rect.setAttribute('y', cy - 10);
+        rect.setAttribute('width', w); rect.setAttribute('height', 20);
+        rect.setAttribute('rx', 10);
+        rect.setAttribute('fill', r.isHead ? '#447099' : '#D0DBE5');
+        svg.appendChild(rect);
+        var lt = document.createElementNS(NS, 'text');
+        lt.setAttribute('x', tx + 7); lt.setAttribute('y', cy + 4);
+        lt.setAttribute('class', r.isHead ? 'gs-ref gs-ref-head' : 'gs-ref');
+        lt.textContent = label;
+        svg.appendChild(lt);
+        tx += w + 6;
+      });
+
+      var sha = document.createElementNS(NS, 'text');
+      sha.setAttribute('x', tx); sha.setAttribute('y', cy + 4);
+      sha.setAttribute('class', 'gs-sha');
+      sha.textContent = c.short;
+      svg.appendChild(sha);
+
+      var msg = document.createElementNS(NS, 'text');
+      msg.setAttribute('x', tx + 62); msg.setAttribute('y', cy + 4);
+      msg.setAttribute('class', 'gs-msg');
+      var m = c.message.length > 46 ? c.message.slice(0, 45) + '…' : c.message;
+      msg.textContent = m;
+      svg.appendChild(msg);
+    });
+  }
+
+  /* -------------------------- staging diagram ------------------------ */
+
+  function renderStages(node, status, graph, files) {
+    var needAdd = []
+      .concat(status.untracked.map(function (f) { return { f: f, k: 'untracked' }; }))
+      .concat(status.modified.map(function (f) { return { f: f, k: 'modified' }; }))
+      .concat(status.deleted.map(function (f) { return { f: f, k: 'deleted' }; }));
+    var staged = status.staged.map(function (s) { return { f: s.file, k: s.kind }; })
+      .concat(status.stagedDeleted.map(function (f) { return { f: f, k: 'deleted' }; }));
+
+    function col(title, note, items, kind) {
+      var chips = items.length
+        ? items.map(function (it) {
+            return '<span class="gs-chip gs-chip-' + kind + '">' + esc(it.f) +
+                   '<span class="gs-chip-k">' + esc(it.k) + '</span></span>';
+          }).join('')
+        : '<span class="gs-chip gs-chip-empty">empty</span>';
+      return '<div class="gs-col">' +
+             '<div class="gs-col-h">' + esc(title) + '</div>' +
+             '<div class="gs-col-n">' + esc(note) + '</div>' +
+             '<div class="gs-chips">' + chips + '</div></div>';
+    }
+
+    var nCommits = graph.commits.length;
+    var repoItems = nCommits
+      ? [{ f: nCommits + ' commit' + (nCommits === 1 ? '' : 's'), k: graph.head || 'detached' }]
+      : [];
+
+    node.innerHTML =
+      col('Working directory', 'what you edit', needAdd, 'work') +
+      '<div class="gs-arrow"><span>git add</span>→</div>' +
+      col('Staging area', 'what goes in next commit', staged, 'stage') +
+      '<div class="gs-arrow"><span>git commit</span>→</div>' +
+      col('Repository', 'permanent history', repoItems, 'repo');
+  }
+
+  /* ------------------------------- mount ----------------------------- */
+
+  function mount(selector, config) {
+    config = config || {};
+    var host = typeof selector === 'string' ? document.querySelector(selector) : selector;
+    if (!host) return null;
+
+    if (!root.git || typeof root.git.init !== 'function') {
+      host.classList.add('gs');
+      host.innerHTML = '<div class="gs-loading">This exercise could not start: the git library did not load. ' +
+        'Check that isomorphic-git.bundle.js is reachable from this page.</div>';
+      return null;
+    }
+    if (typeof root.Buffer === 'undefined') {
+      // isomorphic-git's index code calls a global Buffer. The bundle shipped with
+      // this lesson provides one; a bare CDN copy of isomorphic-git does not.
+      host.classList.add('gs');
+      host.innerHTML = '<div class="gs-loading">This exercise could not start: no Buffer polyfill is present. ' +
+        'Load isomorphic-git.bundle.js (which includes one) rather than isomorphic-git on its own.</div>';
+      return null;
+    }
+
+    var sb = root.GitSandboxCore.createSandbox({ git: root.git });
+    var history = [];
+    var histIdx = -1;
+    var busy = false;
+    var tasks = normaliseTasks(config.tasks);
+    var seed = normaliseSeed(config.seed);
+    var intro = normaliseIntro(config.intro);
+
+    host.classList.add('gs');
+    host.innerHTML =
+      '<div class="gs-head">' +
+        '<span class="gs-eyebrow">' + esc(config.title || 'Git sandbox') + '</span>' +
+        '<button type="button" class="gs-reset">Reset</button>' +
+      '</div>' +
+      '<div class="gs-body">' +
+        '<div class="gs-term-wrap">' +
+          '<div class="gs-out" role="log" aria-live="polite" aria-label="Terminal output"></div>' +
+          '<form class="gs-input-row" autocomplete="off">' +
+            '<label class="gs-prompt" for="' + (host.id || 'gs') + '-in">' + esc(config.prompt || '~/project $') + '</label>' +
+            '<input class="gs-input" id="' + (host.id || 'gs') + '-in" type="text" spellcheck="false"' +
+            ' autocapitalize="off" autocorrect="off" aria-label="Type a git command">' +
+          '</form>' +
+          '<div class="gs-hints"></div>' +
+        '</div>' +
+        '<div class="gs-viz">' +
+          '<div class="gs-viz-h">Where your work lives</div>' +
+          '<div class="gs-stages"></div>' +
+          '<div class="gs-viz-h">Commit history</div>' +
+          '<div class="gs-graph-scroll"><svg class="gs-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="gs-tasks"></div>';
+
+    var out = host.querySelector('.gs-out');
+    var form = host.querySelector('.gs-input-row');
+    var input = host.querySelector('.gs-input');
+    var hintsNode = host.querySelector('.gs-hints');
+    var stagesNode = host.querySelector('.gs-stages');
+    var svg = host.querySelector('.gs-graph');
+    var tasksNode = host.querySelector('.gs-tasks');
+    var resetBtn = host.querySelector('.gs-reset');
+
+    function write(html, cls) {
+      var line = el('div', 'gs-line' + (cls ? ' ' + cls : ''), html);
+      out.appendChild(line);
+      out.scrollTop = out.scrollHeight;
+    }
+    function writeText(text, cls) {
+      if (text === '' || text == null) return;
+      write(markup(text), cls);
+    }
+
+    function renderHints() {
+      var hints = config.hints || [];
+      if (!hints.length) { hintsNode.innerHTML = ''; return; }
+      hintsNode.innerHTML = '<span class="gs-hints-label">Try:</span>';
+      hints.forEach(function (h) {
+        var b = el('button', 'gs-hint', esc(h));
+        b.type = 'button';
+        b.addEventListener('click', function () { input.value = h; input.focus(); });
+        hintsNode.appendChild(b);
+      });
+    }
+
+    function renderTasks() {
+      if (!tasks.length) { tasksNode.innerHTML = ''; return; }
+      var done = 0;
+      var rows = tasks.map(function (t) {
+        if (t._error) {
+          return '<li class="gs-task gs-task-broken">' +
+                 '<span class="gs-task-mark" aria-hidden="true">!</span>' +
+                 '<span class="gs-task-txt">' + t.text +
+                 '<span class="gs-task-err">Authoring error: ' + esc(t._error) + '</span></span></li>';
+        }
+        var ok = !!t._done;
+        if (ok) done++;
+        return '<li class="gs-task' + (ok ? ' is-done' : '') + '">' +
+               '<span class="gs-task-mark" aria-hidden="true">' + (ok ? '✓' : '') + '</span>' +
+               '<span class="gs-task-txt">' + t.text + '</span></li>';
+      }).join('');
+      var broken = tasks.some(function (t) { return !!t._error; });
+      var all = !broken && done === tasks.length;
+      var note = config.doneNote || 'That is the whole exercise.';
+      tasksNode.innerHTML =
+        '<div class="gs-tasks-h">Your turn <span class="gs-count">' + done + ' of ' + tasks.length + '</span></div>' +
+        '<ul class="gs-task-list">' + rows + '</ul>' +
+        (all ? '<div class="gs-done">' + note + '</div>' : '');
+    }
+
+    async function refresh() {
+      var graph = await sb.graphModel();
+      var isRepo = await sb.isRepo();
+      var status = isRepo ? await sb.statusModel()
+        : { staged: [], modified: [], untracked: [], deleted: [], stagedDeleted: [] };
+      var files = await sb.listFiles();
+      if (!isRepo) {
+        status.untracked = files.slice();
+      }
+      renderStages(stagesNode, status, graph, files);
+      renderGraph(svg, graph);
+
+      // `file x contains "y"` needs file contents; read them up front so the
+      // compiled predicates can stay synchronous.
+      var contents = {};
+      for (var f = 0; f < tasks.length; f++) {
+        for (var g = 0; g < (tasks[f]._files || []).length; g++) {
+          var name = tasks[f]._files[g];
+          if (name in contents) continue;
+          try { contents[name] = await sb.readFile(name); }
+          catch (e) { contents[name] = ''; }
+        }
+      }
+
+      var ctx = {
+        sb: sb, graph: graph, status: status, files: files,
+        history: history, isRepo: isRepo,
+        _fileText: function (name) { return contents[name] || ''; }
+      };
+      for (var i = 0; i < tasks.length; i++) {
+        if (tasks[i]._done || tasks[i]._error) continue;
+        try { tasks[i]._done = !!(await tasks[i].check(ctx)); }
+        catch (e) { tasks[i]._done = false; }
+      }
+      renderTasks();
+
+      var br = graph.head;
+      var promptText = (config.prompt || '~/project') .replace(/\s*\$\s*$/, '');
+      host.querySelector('.gs-prompt').textContent =
+        promptText + (br ? ' (' + br + ')' : '') + ' $';
+    }
+
+    async function submit(line) {
+      if (busy) return;
+      busy = true;
+      input.disabled = true;
+      write('<span class="gs-echo-prompt">' + esc(host.querySelector('.gs-prompt').textContent) + '</span> ' + esc(line), 'gs-echo');
+      var r = await sb.run(line);
+      if (line.trim() === 'clear') { out.innerHTML = ''; }
+      else if (line.trim() === 'help') { writeText(helpText()); }
+      else if (line.trim() === 'reset') { await doReset(); }
+      else { writeText(r.out, r.ok ? '' : 'gs-err'); }
+      history.push(line);
+      histIdx = history.length;
+      await refresh();
+      input.disabled = false;
+      busy = false;
+      input.focus();
+    }
+
+    function helpText() {
+      return [
+        '{w}This sandbox runs real git{/} (isomorphic-git) on a repo that lives only in this page.',
+        '',
+        '{y}git{/}    init, status, add, commit -m, log [--oneline], diff,',
+        '       branch [-d], checkout [-b], switch [-c], merge, config',
+        '{y}shell{/}  ls, cat, echo "text" > file, echo "text" >> file, touch, rm, mkdir, pwd',
+        '{y}other{/}  help, clear, reset'
+      ].join('\n');
+    }
+
+    async function doReset() {
+      out.innerHTML = '';
+      tasks.forEach(function (t) { t._done = false; });
+      try {
+        await sb.reset(seed);
+      } catch (e) {
+        writeText('{r}This exercise could not be set up: ' + e.message + '{/}', 'gs-err');
+        await refresh();
+        return;
+      }
+      intro.forEach(function (l) { writeText(l); });
+      await refresh();
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var v = input.value;
+      input.value = '';
+      if (!v.trim()) return;
+      submit(v);
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowUp') {
+        if (!history.length) return;
+        e.preventDefault();
+        histIdx = Math.max(0, histIdx - 1);
+        input.value = history[histIdx] || '';
+      } else if (e.key === 'ArrowDown') {
+        if (!history.length) return;
+        e.preventDefault();
+        histIdx = Math.min(history.length, histIdx + 1);
+        input.value = history[histIdx] || '';
+      }
+    });
+
+    resetBtn.addEventListener('click', function () { doReset(); });
+    host.querySelector('.gs-out').addEventListener('click', function () { input.focus(); });
+
+    renderHints();
+    var ready = doReset();
+
+    return { sandbox: sb, refresh: refresh, run: submit, ready: ready, tasks: tasks };
+  }
+
+  /* ------------------- helpers for exercise checks ------------------- */
+
+  // oid a branch currently points at, or null
+  function branchOid(graph, name) {
+    var b = (graph.branches || []).filter(function (x) { return x.name === name; })[0];
+    return b ? b.oid : null;
+  }
+
+  // is `target` reachable by walking parents back from `from`?
+  function reaches(graph, from, target) {
+    if (!from || !target) return false;
+    if (from === target) return true;
+    var byOid = {};
+    graph.commits.forEach(function (c) { byOid[c.oid] = c; });
+    var stack = [from];
+    var seen = {};
+    while (stack.length) {
+      var oid = stack.pop();
+      if (oid === target) return true;
+      if (seen[oid]) continue;
+      seen[oid] = true;
+      var c = byOid[oid];
+      if (c) (c.parents || []).forEach(function (p) { stack.push(p); });
+    }
+    return false;
+  }
+
+  // has branch `name` been merged into branch `into`?
+  function isMerged(graph, name, into) {
+    return reaches(graph, branchOid(graph, into), branchOid(graph, name));
+  }
+
+  // how many commits are reachable from a branch tip
+  function commitCount(graph, name) {
+    var tip = branchOid(graph, name);
+    if (!tip) return 0;
+    var byOid = {};
+    graph.commits.forEach(function (c) { byOid[c.oid] = c; });
+    var stack = [tip], seen = {}, n = 0;
+    while (stack.length) {
+      var oid = stack.pop();
+      if (seen[oid]) continue;
+      seen[oid] = true; n++;
+      var c = byOid[oid];
+      if (c) (c.parents || []).forEach(function (p) { stack.push(p); });
+    }
+    return n;
+  }
+
+  function hasMergeCommit(graph) {
+    return graph.commits.some(function (c) { return (c.parents || []).length > 1; });
+  }
+
+  function boot() {
+    var pending = root.__gsPending || [];
+    pending.forEach(function (p) { mount(p[0], p[1]); });
+    root.__gsPending = { push: function (p) { mount(p[0], p[1]); } };
+  }
+
+  root.GitSandboxUI = {
+    mount: mount,
+    boot: boot,
+    branchOid: branchOid,
+    reaches: reaches,
+    isMerged: isMerged,
+    commitCount: commitCount,
+    hasMergeCommit: hasMergeCommit
+  };
+})(window);

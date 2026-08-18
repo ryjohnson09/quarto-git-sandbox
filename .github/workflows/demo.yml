@@ -1,0 +1,53 @@
+# Publishes example.qmd to GitHub Pages as a live demo, so people can try the
+# exercises before installing anything.
+#
+# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+name: demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: 1.6.43
+
+      - name: Render the demo
+        run: quarto render example.qmd --output index.html
+
+      - uses: actions/configure-pages@v5
+
+      - name: Collect the site
+        run: |
+          mkdir -p _site
+          mv index.html _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

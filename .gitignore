@@ -1,0 +1,8 @@
+node_modules/
+.quarto/
+_site/
+index.html
+example.html
+example_files/
+tests/graph-preview.svg
+tests/*.html

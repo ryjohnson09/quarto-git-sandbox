@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Git sandbox — standalone embed</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;700&family=Source+Code+Pro:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_extensions/git-sandbox/resources/git-sandbox.css">
+<style>
+  body {
+    font-family: "Open Sans", system-ui, sans-serif;
+    color: #404041;
+    background: #FFFFFF;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+    line-height: 1.6;
+  }
+  h1 { font-weight: 300; letter-spacing: -0.01em; color: #404041; }
+  p  { max-width: 68ch; }
+</style>
+</head>
+<body>
+
+<!--
+  The same widget outside Quarto: drop these three files next to your page and
+  add a container div plus a mount call. Useful if your platform will take an
+  iframe or a raw HTML block but not a full Quarto document.
+-->
+
+<h1>Git sandbox — standalone embed</h1>
+
+<p>This page uses no Quarto and no build step: one stylesheet, one vendored copy
+of isomorphic-git, and the sandbox script. Everything runs in the browser.</p>
+
+<p>Conditions here are JavaScript rather than the <code>when:</code> language,
+because there is no filter to compile them. Copy the three files out of
+<code>_extensions/git-sandbox/resources/</code> to use this anywhere.</p>
+
+<div class="git-sandbox" id="demo">
+  <div class="gs-loading">Loading the Git sandbox…</div>
+</div>
+
+<script src="_extensions/git-sandbox/resources/isomorphic-git.bundle.js"></script>
+<script src="_extensions/git-sandbox/resources/git-sandbox.js"></script>
+<script>
+GitSandboxUI.mount('#demo', {
+  title: 'Practice',
+  prompt: '~/project $',
+  intro: [
+    'A real git repository, running in this page. Type {y}help{/} to see what is supported.'
+  ],
+  hints: ['git init', 'git status', 'echo "hello" > notes.txt', 'git add .', 'git commit -m "First commit"'],
+  doneNote: 'That is the core loop.',
+  // Optional: start from an existing history instead of an empty folder.
+  // seed: async (sb) => {
+  //   await sb.run('git init');
+  //   await sb.run('echo "# Project" > README.md');
+  //   await sb.run('git add .');
+  //   await sb.run('git commit -m "Add the README"');
+  // },
+  tasks: [
+    { text: 'Create a repository with <code>git init</code>',
+      check: async (c) => c.isRepo },
+    { text: 'Make a commit',
+      check: async (c) => c.graph.commits.length >= 1 },
+    { text: 'Create a branch called <code>topic</code> and merge it into <code>main</code>',
+      check: async (c) => c.graph.head === 'main' &&
+                          GitSandboxUI.isMerged(c.graph, 'topic', 'main') &&
+                          GitSandboxUI.commitCount(c.graph, 'main') >= 2 }
+  ]
+});
+</script>
+
+</body>
+</html>

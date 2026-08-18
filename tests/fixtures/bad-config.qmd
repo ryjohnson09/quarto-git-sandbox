@@ -1,0 +1,77 @@
+---
+title: "Configuration errors"
+format: html
+filters:
+  - git-sandbox
+---
+
+Every block below is wrong on purpose. Each should render a visible
+configuration error rather than a broken exercise or a blank space.
+
+## Unknown option
+
+```git-sandbox
+title: Typo in an option name
+tittle: this key does not exist
+tasks:
+  - text: Make a commit
+    when: commits >= 1
+```
+
+## A task with no condition
+
+```git-sandbox
+title: Task missing when
+tasks:
+  - text: Make a commit
+```
+
+## A task with both when and js
+
+```git-sandbox
+title: Task with both
+tasks:
+  - text: Make a commit
+    when: commits >= 1
+    js: c.graph.commits.length >= 1
+```
+
+## An unknown option inside a task
+
+```git-sandbox
+title: Unknown task option
+tasks:
+  - text: Make a commit
+    whn: commits >= 1
+```
+
+## Tasks that are not a list
+
+```git-sandbox
+title: Tasks not a list
+tasks: commits >= 1
+```
+
+## Options that are not key/value at all
+
+```git-sandbox
+this is not yaml at all
+```
+
+## Two exercises sharing an id
+
+```git-sandbox
+id: duplicated
+title: First
+tasks:
+  - text: Make a commit
+    when: commits >= 1
+```
+
+```git-sandbox
+id: duplicated
+title: Second
+tasks:
+  - text: Make a commit
+    when: commits >= 1
+```
