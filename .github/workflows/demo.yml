@@ -14,9 +14,12 @@ permissions:
   pages: write
   id-token: write
 
+# Allow one deployment at a time, but never cancel one that is already running:
+# cancelling mid-deployment can leave the Pages deployment stuck in "queued",
+# which then blocks every later run. This matches GitHub's own Pages template.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
