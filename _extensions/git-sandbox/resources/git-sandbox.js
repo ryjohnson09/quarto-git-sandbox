@@ -1,16 +1,11 @@
 /* =====================================================================
    git-sandbox.js — a real git repository that lives entirely in the page.
-   Runs isomorphic-git (MIT) against an in-memory filesystem, and renders
-   a terminal, a working-directory/staging/repository diagram, and a live
-   commit graph. Nothing is sent to a server; nothing is written to disk.
 
-   Load isomorphic-git.bundle.js first, then this file.
+   Runs isomorphic-git (MIT) against an in-memory filesystem, and renders a
+   terminal, a working-directory/staging/repository diagram, and a live commit
+   graph. Nothing is sent to a server; nothing is written to disk.
 
-   Usage:
-     <div class="git-sandbox" id="sbx-first-commit"></div>
-     <script>
-       GitSandboxUI.mount('#sbx-first-commit', { title: '...', tasks: [...] });
-     </script>
+   GENERATED FILE — do not edit. Built from src/ by ./build.sh.
    ===================================================================== */
 
 /* ------------------------------------------------------------------
