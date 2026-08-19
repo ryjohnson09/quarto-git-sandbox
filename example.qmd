@@ -35,18 +35,18 @@ reference, see the
 ## Reading a git box
 
 Before writing exercises, know what your learners are looking at. A git box
-has two halves. On the left, a **terminal**: the prompt shows the folder
+is a stack. At the top, a **terminal**: the prompt shows the folder
 and, once a repository exists, the current branch. Learners type commands
 and press Enter; the **Try:** buttons under the input fill in a command so
 nobody is stuck guessing syntax; the up arrow recalls history, and `help`
 lists everything the sandbox supports.
 
-On the right, three panels that re-render after *every* command:
+Below the terminal, three panels that re-render after *every* command:
 
 - **Where your work lives** — the working directory / staging area /
-  repository diagram. Files appear as chips and move between columns as
-  they are edited, staged, and committed. This is the mental model that
-  makes Git click.
+  repository diagram. Files appear as chips and move from one area to the
+  next as they are edited, staged, and committed. This is the mental model
+  that makes Git click.
 - **Changes since last commit** — a live diff. Edited files show green
   `+` and red `-` lines; new files are all additions, deleted files all
   removals. It answers "what would I be committing right now?"
@@ -66,7 +66,7 @@ title: Tour — the parts of a git box
 prompt: "~/demo-project $"
 intro: |
   This repository already has two commits. Run a few commands and watch
-  the panels on the right — every one of them updates after each command.
+  the panels below — every one of them updates after each command.
   Type {y}help{/} to see what the sandbox supports.
 hints: [git status, git log --oneline, 'echo "A new line." >> README.md', git diff, git add ., 'git commit -m "Extend the README"']
 done-note: That is the whole feedback loop — every command updates every panel. Your lessons ride on top of it.
@@ -83,7 +83,7 @@ tasks:
     when: ran /^\s*git\s+status/
   - text: Change a file and find it in the Changes panel
     when: not clean
-  - text: Stage it and watch it move columns in the diagram
+  - text: Stage it and watch it move to the staging area in the diagram
     when: staged
   - text: Commit it and watch the history graph grow
     when: commits >= 3
@@ -98,7 +98,7 @@ title: Tour — the parts of a git box
 prompt: "~/demo-project $"
 intro: |
   This repository already has two commits. Run a few commands and watch
-  the panels on the right — every one of them updates after each command.
+  the panels below — every one of them updates after each command.
   Type {y}help{/} to see what the sandbox supports.
 hints: [git status, git log --oneline, 'echo "A new line." >> README.md', git diff, git add ., 'git commit -m "Extend the README"']
 done-note: That is the whole feedback loop — every command updates every panel. Your lessons ride on top of it.
@@ -115,7 +115,7 @@ tasks:
     when: ran /^\s*git\s+status/
   - text: Change a file and find it in the Changes panel
     when: not clean
-  - text: Stage it and watch it move columns in the diagram
+  - text: Stage it and watch it move to the staging area in the diagram
     when: staged
   - text: Commit it and watch the history graph grow
     when: commits >= 3
