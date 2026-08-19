@@ -173,8 +173,21 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     /no repository/.test(host.querySelector('.gs-state').textContent),
     host.querySelector('.gs-state').innerHTML);
 
+  // pre-init files are just files, not "untracked"
+  await run('echo hi > pre.txt');
+  check('pre-init file renders as grey "not in git yet" chip',
+    /pre\.txt/.test(workCol().textContent) &&
+    /not in git yet/.test(workCol().textContent) &&
+    !/untracked/.test(workCol().textContent) &&
+    workCol().querySelectorAll('.gs-chip-clean').length === 1,
+    workCol().innerHTML);
+
   // rebuild a graph and dump the SVG for visual inspection
   await run('git init');
+  check('pre-init file becomes untracked once a repo exists',
+    /untracked/.test(workCol().textContent) &&
+    workCol().querySelectorAll('.gs-chip-clean').length === 0,
+    workCol().innerHTML);
   await run('echo a > a.txt'); await run('git add .'); await run('git commit -m "Add the project README"');
   await run('echo b > b.txt'); await run('git add .'); await run('git commit -m "Set up the data folder"');
   await run('git checkout -b analysis');

@@ -18,7 +18,6 @@ async function contextFor(sb) {
   const status = isRepo ? await sb.statusModel()
     : { staged: [], modified: [], untracked: [], deleted: [], stagedDeleted: [] };
   const files = await sb.listFiles();
-  if (!isRepo) status.untracked = files.slice();
   const contents = {};
   for (const f of files) {
     try { contents[f] = await sb.readFile(f); } catch (e) { contents[f] = ''; }

@@ -1847,7 +1847,7 @@
 
   /* -------------------------- staging diagram ------------------------ */
 
-  function renderStages(node, status, graph, files) {
+  function renderStages(node, status, graph, files, isRepo) {
     var needAdd = []
       .concat(status.untracked.map(function (f) { return { f: f, k: 'untracked' }; }))
       .concat(status.modified.map(function (f) { return { f: f, k: 'modified' }; }))
@@ -1855,19 +1855,21 @@
     var staged = status.staged.map(function (s) { return { f: s.file, k: s.kind }; })
       .concat(status.stagedDeleted.map(function (f) { return { f: f, k: 'deleted' }; }));
 
-    // Committed-and-clean files have no git status, but the learner still
-    // needs to see they exist — otherwise "edit notes.txt" points at a column
-    // that claims to be empty.
+    // Files with no git status still need to be visible: committed-and-clean
+    // files after init, and every file before it. Before `git init` they are
+    // just files — calling them "untracked" would use a git-status word while
+    // no git status exists yet — so they render as quiet grey chips either way.
     var accounted = {};
     needAdd.concat(staged).forEach(function (it) { accounted[it.f] = true; });
     var clean = (files || [])
       .filter(function (f) { return !accounted[f]; })
-      .map(function (f) { return { f: f, k: 'unchanged' }; });
+      .map(function (f) { return { f: f, k: isRepo ? 'unchanged' : 'not in git yet' }; });
 
     function col(title, note, items, kind) {
       var chips = items.length
         ? items.map(function (it) {
-            var cls = 'gs-chip gs-chip-' + kind + (it.k === 'unchanged' ? ' gs-chip-clean' : '');
+            var quiet = it.k === 'unchanged' || it.k === 'not in git yet';
+            var cls = 'gs-chip gs-chip-' + kind + (quiet ? ' gs-chip-clean' : '');
             return '<span class="' + cls + '">' + esc(it.f) +
                    '<span class="gs-chip-k">' + esc(it.k) + '</span></span>';
           }).join('')
@@ -2050,10 +2052,7 @@
       var status = isRepo ? await sb.statusModel()
         : { staged: [], modified: [], untracked: [], deleted: [], stagedDeleted: [] };
       var files = await sb.listFiles();
-      if (!isRepo) {
-        status.untracked = files.slice();
-      }
-      renderStages(stagesNode, status, graph, files);
+      renderStages(stagesNode, status, graph, files, isRepo);
       renderDiff(diffNode, await sb.diffModel());
       renderGraph(svg, graph);
       lastGraph = graph;
