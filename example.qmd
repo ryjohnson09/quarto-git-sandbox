@@ -1,6 +1,6 @@
 ---
 title: "Building interactive Git exercises"
-subtitle: "An author's guide to the git-sandbox extension — what each panel means, and how to write your own exercises"
+subtitle: "An author's guide to the git-sandbox extension: what each panel means, and how to write your own exercises"
 format:
   html:
     toc: true
@@ -21,7 +21,7 @@ filters:
 A ` ```git-sandbox ` block in your Quarto document becomes a **real Git
 repository running in the reader's browser**. Learners type real `git`
 commands; the box shows them what happened. You author everything in
-Markdown and YAML — no JavaScript.
+Markdown and YAML, with no JavaScript.
 
 Nothing is installed and nothing leaves the page. The repository lives in
 memory and disappears on reload, so learners can experiment fearlessly.
@@ -43,33 +43,33 @@ lists everything the sandbox supports.
 
 Below the terminal, three panels that re-render after *every* command:
 
-- **Where your work lives** — the working directory / staging area /
+- **Where your work lives**: the working directory / staging area /
   repository diagram. Files appear as chips and move from one area to the
   next as they are edited, staged, and committed. This is the mental model
   that makes Git click.
-- **Changes since last commit** — a live diff. Edited files show green
+- **Changes since last commit**: a live diff. Edited files show green
   `+` and red `-` lines; new files are all additions, deleted files all
   removals. It answers "what would I be committing right now?"
-- **Commit history** — the graph. Branches get lanes, `HEAD` and branch
+- **Commit history**: the graph. Branches get lanes, `HEAD` and branch
   pills mark the tips, merge commits are hollow circles.
 
 Below everything sits **Your turn**, the task checklist you author. Tasks
 tick themselves when their condition becomes true, and **Reset** returns
 the box to its starting state.
 
-Try it — this box is seeded with two commits so every panel has something
+Try it: this box is seeded with two commits so every panel has something
 to show:
 
 ```git-sandbox
 id: anatomy
-title: Tour — the parts of a git box
+title: A tour of the git box
 prompt: "~/demo-project $"
 intro: |
   This repository already has two commits. Run a few commands and watch
-  the panels below — every one of them updates after each command.
+  the panels below; every one of them updates after each command.
   Type {y}help{/} to see what the sandbox supports.
 hints: [git status, git log --oneline, 'echo "A new line." >> README.md', git diff, git add ., 'git commit -m "Extend the README"']
-done-note: That is the whole feedback loop — every command updates every panel. Your lessons ride on top of it.
+done-note: That is the whole feedback loop. Every command updates every panel. Your lessons ride on top of it.
 seed: |
   git init
   echo "# Demo project" > README.md
@@ -94,14 +94,14 @@ Here is the complete block that produced the box above:
 ````markdown
 ```git-sandbox
 id: anatomy
-title: Tour — the parts of a git box
+title: A tour of the git box
 prompt: "~/demo-project $"
 intro: |
   This repository already has two commits. Run a few commands and watch
-  the panels below — every one of them updates after each command.
+  the panels below; every one of them updates after each command.
   Type {y}help{/} to see what the sandbox supports.
 hints: [git status, git log --oneline, 'echo "A new line." >> README.md', git diff, git add ., 'git commit -m "Extend the README"']
-done-note: That is the whole feedback loop — every command updates every panel. Your lessons ride on top of it.
+done-note: That is the whole feedback loop. Every command updates every panel. Your lessons ride on top of it.
 seed: |
   git init
   echo "# Demo project" > README.md
@@ -135,7 +135,7 @@ title: A minimal exercise
 prompt: "~/scratch $"
 intro: |
   This box was authored in a few lines of YAML. It starts as an
-  empty folder — nothing is tracked yet.
+  empty folder; nothing is tracked yet.
 hints: [git init, 'echo "hello" > notes.txt', git add notes.txt, 'git commit -m "First note"']
 tasks:
   - text: Turn the folder into a repository
@@ -151,7 +151,7 @@ title: A minimal exercise
 prompt: "~/scratch $"
 intro: |
   This box was authored in a few lines of YAML. It starts as an
-  empty folder — nothing is tracked yet.
+  empty folder; nothing is tracked yet.
 hints: [git init, 'echo "hello" > notes.txt', git add notes.txt, 'git commit -m "First note"']
 tasks:
   - text: Turn the folder into a repository
@@ -173,7 +173,7 @@ Three authoring notes that save time:
 
 ## Checking the learner's work
 
-Each task has a `when:` condition written in a small declarative language —
+Each task has a `when:` condition written in a small declarative language,
 the same language for everything, no JavaScript. A task ticks when its
 condition first becomes true and stays ticked, so you can check for states
 the learner merely passes through.
@@ -183,24 +183,24 @@ that drives it.
 
 ```git-sandbox
 id: when-playground
-title: Playground — the when language
+title: The when-language playground
 prompt: "~/demo-project $"
 intro: |
   Each task below shows the {y}when:{/} condition that checks it.
   Complete them in any order.
 hints: [git checkout -b docs, 'echo "## Setup" > SETUP.md', git add ., 'git commit -m "Describe the setup"', git checkout main, git merge docs]
-done-note: Every condition here is plain YAML — see the README for the full list.
+done-note: Every condition here is plain YAML. See the README for the full list.
 seed: |
   git init
   echo "# Demo project" > README.md
   git add .
   git commit -m "Add the README"
 tasks:
-  - text: 'Create a branch called `docs` — `when: branch docs`'
+  - text: 'Create a branch called `docs` (`when: branch docs`)'
     when: branch docs
-  - text: 'Add a file mentioning Setup — `when: file SETUP.md contains "Setup"`'
+  - text: 'Add a file mentioning Setup (`when: file SETUP.md contains "Setup"`)'
     when: file SETUP.md contains "Setup"
-  - text: 'Bring it back — `when: on main and merged docs into main`'
+  - text: 'Bring it back (`when: on main and merged docs into main`)'
     when: on main and merged docs into main
 ```
 
@@ -223,12 +223,12 @@ Two habits worth adopting:
 
 `seed` runs commands before the learner arrives, so you can start an
 exercise in the middle of a story. This one seeds a `forecast` branch that
-has diverged from `main` — the learner commits on `main`, merges, and sees
+has diverged from `main`: the learner commits on `main`, merges, and sees
 a genuine merge commit appear as a hollow circle joining two lanes.
 
 ```git-sandbox
 id: merge-flow
-title: Flow — merge a diverged branch
+title: Merge a diverged branch
 prompt: "~/sales-analysis $"
 intro: |
   A colleague worked on the {y}forecast{/} branch while main moved on.
@@ -283,27 +283,27 @@ the seed, so learners always return to the exact state you designed.
 
 ## Flow: a remote, push and pull
 
-`git remote add origin <url>` in a seed creates a **mock remote** — a
-second repository inside the page — and reveals the *Remote — origin*
+`git remote add origin <url>` in a seed creates a **mock remote**, a
+second repository inside the page, and reveals the *Remote (origin)*
 panel, drawn as its own commit graph with an in-sync/ahead/behind summary.
 Push, fetch, and pull behave like the real thing, including rejected
 non-fast-forward pushes.
 
 One authoring-only command makes the classic scenario possible:
 `rewind <n>` moves the local branch back after a push, so the pushed
-commits exist only on the remote — exactly as if a colleague pushed while
+commits exist only on the remote, exactly as if a colleague pushed while
 the learner was away.
 
 ```git-sandbox
 id: remote-flow
-title: Flow — pull, work, push
+title: Pull, work, push
 prompt: "~/sales-analysis $"
 intro: |
   While you were away, a colleague pushed a commit to the shared repository.
-  Compare {y}Commit history{/} with {y}Remote — origin{/}: the remote is ahead.
+  Compare {y}Commit history{/} with {y}Remote (origin){/}: the remote is ahead.
   (Try {y}git push{/} first if you want to see what a rejected push looks like.)
 hints: [git fetch, git pull, git log --oneline, 'echo "sales <- read_csv(\"sales.csv\")" > load.R', git add ., 'git commit -m "Load the sales data"', git push]
-done-note: Pull, work, push — and the two graphs agree again. The rewind trick in the seed is what made the remote start out ahead.
+done-note: Pull, work, push, and the two graphs agree again. The rewind trick in the seed is what made the remote start out ahead.
 seed: |
   git init
   git remote add origin https://github.com/acme/sales-analysis
@@ -321,7 +321,7 @@ tasks:
     when: ran /^\s*git\s+fetch\s*$/
   - text: Bring the colleague's commit into your branch with `git pull`
     when: commits on main >= 2
-  - text: Do your own work — create a file, stage it, commit it
+  - text: 'Do your own work: create a file, stage it, commit it'
     when: commits on main >= 3
   - text: Publish it with `git push`, and check the two graphs agree
     when: commits on main >= 3 and pushed
@@ -355,7 +355,7 @@ branch is on the remote.
   escape hatch for conditions the language cannot express, and notes on
   CSP and page weight for LMS embedding.
 - `example-embed.html` in the repository shows the sandbox running in a
-  plain HTML page with no Quarto at all — useful for platforms that accept
+  plain HTML page with no Quarto at all, useful for platforms that accept
   an HTML block or iframe.
 - Install with `quarto add ryjohnson09/quarto-git-sandbox`, add
   `git-sandbox` to your document's `filters`, and start with the minimal

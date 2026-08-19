@@ -12,7 +12,7 @@ npm install
 ```
 
 You need Node 18+ and Quarto 1.4+. `npm install` pulls development
-dependencies only — the extension itself ships as plain files and needs no
+dependencies only; the extension itself ships as plain files and needs no
 build step to *use*.
 
 ## How the pieces fit together
@@ -22,7 +22,7 @@ _extensions/git-sandbox/
   git-sandbox.lua      the filter: reads the block, emits a div + config JSON
   yaml.lua             a small YAML subset parser
   resources/
-    git-sandbox.js     GENERATED from src/ by ./build.sh — do not edit
+    git-sandbox.js     GENERATED from src/ by ./build.sh; do not edit
     git-sandbox.css    styling
     isomorphic-git.bundle.js   GENERATED from vendor/ by ./build.sh --vendor
     git-sandbox-boot.js        mounts the exercises the filter queued
@@ -59,7 +59,7 @@ without a toolchain.
 
 The UI and end-to-end suites use jsdom, so they run in CI without a browser.
 `test-rendered.js` loads the actual rendered HTML, executes its real scripts,
-and completes all three exercises by submitting the form — if it passes, the
+and completes the exercises by submitting the form. If it passes, the
 lesson works.
 
 Please add tests with changes. New `when:` conditions in particular should get
@@ -88,7 +88,7 @@ afterwards, and only to fields that should have it (`title`, `done-note`, task
   `src/`) so it runs without transpilation in older embedded webviews. Tests may
   use modern syntax.
 - Comments should explain *why*, not restate the code. If a line looks wrong but
-  is deliberate, say why — the `Buffer` polyfill and the `assert` workaround are
+  is deliberate, say why; the `Buffer` polyfill and the `assert` workaround are
   the model here.
 - Error messages are read by lesson authors, not programmers. Name the thing
   that is wrong and what was expected.
@@ -107,7 +107,7 @@ opening a pull request, and keep a non-colour signal alongside it.
 3. Tag the release: `git tag v1.0.1 && git push --tags`.
 
 `quarto add ryjohnson09/quarto-git-sandbox` installs from the **HEAD of `main`**,
-not from the latest tag — so whatever is on `main` is what people get. Tags are
+not from the latest tag, so whatever is on `main` is what people get. Tags are
 opt-in for users who ask for them:
 
 ```bash

@@ -1938,7 +1938,7 @@
           '<div class="gs-viz-h">Commit history</div>' +
           '<div class="gs-graph-scroll"><svg class="gs-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
           '<div class="gs-remote" hidden>' +
-            '<div class="gs-viz-h">Remote — origin</div>' +
+            '<div class="gs-viz-h">Remote (origin)</div>' +
             '<div class="gs-graph-scroll"><svg class="gs-remote-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
             '<div class="gs-remote-sync"></div>' +
           '</div>' +

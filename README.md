@@ -5,11 +5,11 @@
 **[Try the live demo →](https://ryjohnson09.github.io/quarto-git-sandbox/)**
 
 Interactive Git exercises for Quarto documents. Each exercise is a **real Git
-repository running in the reader's browser** — learners type real `git`
+repository running in the reader's browser**. Learners type real `git`
 commands and watch a working-directory/staging/repository diagram, a live
 diff of what changed, and a live commit graph update as they go. Exercises
 can also add a **mock remote**: a second repository inside the page that
-learners `push` to, `fetch` and `pull` from, drawn as its own commit graph —
+learners `push` to, `fetch` and `pull` from, drawn as its own commit graph,
 including realistic rejected pushes when the remote is ahead.
 
 Nothing is installed, nothing is uploaded, nothing is written to disk.
@@ -47,8 +47,9 @@ filters:
 ---
 ```
 
-`example.qmd` in this repository is a complete six-exercise lesson — from
-first commit through diffs, branching, merging, and pushing to a remote.
+`example.qmd` in this repository is an author's guide built with the extension itself:
+five working boxes, each paired with the block that produced it, from a tour
+of the panels through branching, merging, and pushing to a remote.
 Render it to see everything working:
 
 ```bash
@@ -62,7 +63,7 @@ Requires Quarto 1.4 or later, and an HTML output format.
 ````markdown
 ```git-sandbox
 id: first-commit
-title: Exercise 1 — your first commit
+title: Exercise 1 - your first commit
 prompt: "~/sales-analysis $"
 intro: |
   You have an empty project folder. Nothing is tracked yet.
@@ -73,7 +74,7 @@ seed: |
   echo "# Sales analysis" > README.md
   git add .
   git commit -m "Add the project README"
-done-note: Edit, stage, commit — that loop is most of Git.
+done-note: Edit, stage, commit - that loop is most of Git.
 tasks:
   - text: Create a branch called `report`
     when: branch report
@@ -91,7 +92,7 @@ tasks:
 | `id` | HTML id for the exercise. Defaults to `git-sandbox-1`, `-2`, … Useful for linking. |
 | `title` | Shown in the exercise header. Markdown allowed. |
 | `prompt` | Shell prompt. The current branch is appended automatically. Default `~/project $`. |
-| `intro` | Lines printed in the terminal when the exercise loads. Verbatim — no Markdown. |
+| `intro` | Lines printed in the terminal when the exercise loads. Verbatim; no Markdown. |
 | `hints` | Clickable buttons that fill the input. Give learners the commands they need. |
 | `seed` | Commands run before the learner arrives, to set up a starting history. |
 | `done-note` | Shown once every task is complete. Markdown allowed. |
@@ -111,10 +112,10 @@ than dropping the learner into a half-built repository.
 ### Seeding a remote
 
 Running `git remote add origin <url>` in a seed (or by the learner) creates
-the mock remote and reveals the **Remote — origin** panel. To stage the
+the mock remote and reveals the **Remote (origin)** panel. To stage the
 classic "a colleague pushed while you were away" scenario, make the
 colleague's commits, push them, then use the authoring-only `rewind <n>`
-command to move the local branch back — the commits now exist only on the
+command to move the local branch back, so the commits now exist only on the
 remote, ready to be discovered with `git fetch` and brought in with
 `git pull`:
 
@@ -138,7 +139,7 @@ message, so the push → rejected → pull → push loop can be taught honestly.
 
 ## Conditions: the `when:` language
 
-A task ticks when its condition becomes true, and stays ticked afterwards — so
+A task ticks when its condition becomes true, and stays ticked afterwards, so
 you can check for states the learner passes through.
 
 | Condition | True when |
@@ -168,8 +169,8 @@ when: (staged or commits >= 1) and file README.md
 
 **Prefer state over `ran`.** `commits >= 1` is true however the learner got
 there; `ran "git commit"` breaks the moment someone uses a different flag. Use
-`ran` only when running a specific command *is* the point — checking `git
-status`, for instance.
+`ran` only when running a specific command *is* the point, such as checking
+`git status`.
 
 ### Errors are visible
 
@@ -202,16 +203,16 @@ tasks:
 | `c.sb` | The sandbox, for `await c.sb.readFile('notes.txt')` |
 
 `js:` uses `new Function`, so it needs `'unsafe-eval'` in your Content Security
-Policy. `when:` does not — another reason to prefer it.
+Policy. `when:` does not, which is another reason to prefer it.
 
 ## What the sandbox supports
 
-**Git** — `init`, `status`, `add`, `rm`, `commit -m`, `log [--oneline]`,
+**Git:** `init`, `status`, `add`, `rm`, `commit -m`, `log [--oneline]`,
 `diff`, `branch [-d]`, `checkout [-b]`, `switch [-c]`, `merge`,
 `remote [-v] | remote add origin <url>`, `push [-u origin <branch>]`,
 `fetch`, `pull`, `config user.name|user.email`
 
-**Shell** — `ls [-a]`, `cat`, `echo "…" > file`, `echo "…" >> file`, `touch`,
+**Shell:** `ls [-a]`, `cat`, `echo "…" > file`, `echo "…" >> file`, `touch`,
 `rm`, `mkdir`, `pwd`, `whoami`, plus `help`, `clear`, `reset`, and the
 authoring-only `rewind <n>`
 
@@ -226,7 +227,7 @@ seeded state.
 
 ## What it does not do, on purpose
 
-- **No network remotes.** The remote is a mock that lives in the page — there
+- **No network remotes.** The remote is a mock that lives in the page: there
   is no `clone`, and nothing talks to a real server. isomorphic-git can talk
   to GitHub through a CORS proxy, which is a real but separate piece of work.
 - **No conflict resolution.** isomorphic-git merges cleanly or fails. A
@@ -248,7 +249,7 @@ document.
 - **Page weight.** The Git engine is 260 KB (80 KB gzipped) and loads after the
   body, so it never blocks first paint. With `embed-resources: true` a lesson
   becomes a single self-contained file of roughly 2 MB, much of it embedded
-  fonts — worth dropping the font `<link>` if your platform already serves Open
+  fonts. It is worth dropping the font `<link>` if your platform already serves Open
   Sans and Source Code Pro.
 - **Content Security Policy.** `embed-resources: true` inlines scripts as
   `data:` URIs, so `script-src` needs `data:`. Without `embed-resources` the
@@ -274,7 +275,7 @@ and rebuild. See `CONTRIBUTING.md`.
 
 ## Licence
 
-MIT — see `LICENSE`.
+MIT; see `LICENSE`.
 
 `_extensions/git-sandbox/resources/isomorphic-git.bundle.js` bundles
 [isomorphic-git](https://isomorphic-git.org) and
