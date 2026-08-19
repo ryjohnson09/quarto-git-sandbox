@@ -1,6 +1,7 @@
-/* End-to-end: load the RENDERED git-lesson.html in jsdom, execute its real
-   inlined scripts, and drive all six exercises to completion.
-   Run: node test-rendered.js ../git-lesson.html */
+/* End-to-end: load the RENDERED example.html (the author's guide) in jsdom,
+   execute its real inlined scripts, and drive all five demo boxes to
+   completion.
+   Run: node test-rendered.js ../example.html */
 const fs = require('fs');
 const path = require('path');
 const { JSDOM, VirtualConsole } = require('jsdom');
@@ -86,8 +87,8 @@ function outText(win, hostId) {
 
   // whichever ids the page used (hand-written qmd or the extension)
   const IDS = Array.from(win.document.querySelectorAll('.git-sandbox')).map(d => d.id);
-  check('page has six exercises', IDS.length === 6, JSON.stringify(IDS));
-  const [ID1, ID2, ID3, ID4, ID5, ID6] = IDS;
+  check('page has five demo boxes', IDS.length === 5, JSON.stringify(IDS));
+  const [ID1, ID2, ID3, ID4, ID5] = IDS;
 
   for (const id of IDS) {
     await waitFor(() => win.document.querySelector('#' + id + ' .gs-input'), 15000, id + ' to mount');
@@ -96,243 +97,189 @@ function outText(win, hostId) {
       !/Loading the Git sandbox/.test(win.document.querySelector('#' + id).textContent));
   }
 
-  /* ---------------- exercise 1 ---------------- */
+  /* ---------------- box 1: anatomy tour ---------------- */
   {
     const id = ID1;
     const type = typer(win, id);
-    check('ex1 starts at 0 done', tasksState(win, id).done === 0, tasksState(win, id).text);
-    check('ex1 has 6 tasks', tasksState(win, id).total === 6);
-    check('ex1 starts with no repo', /No commits yet/.test(win.document.querySelector('#' + id + ' .gs-graph').textContent));
-
-    await type('git status');
-    check('ex1 status before init errors', /not a git repository/.test(outText(win, id)));
-
-    await type('git init');
-    await type('echo "# Sales analysis" > README.md');
-    await type('git status');
-    await type('git add README.md');
-    await type('git commit -m "Add the project README"');
-    check('ex1 5 of 6 after first commit', tasksState(win, id).done === 5, tasksState(win, id).text);
-
-    await type('echo "Quarterly revenue analysis." >> README.md');
-    await type('git diff');
-    check('ex1 diff shows the new line', /Quarterly revenue analysis/.test(outText(win, id)));
-    await type('git add .');
-    await type('git commit -m "Describe the project"');
-
-    const st = tasksState(win, id);
-    check('ex1 all 6 tasks complete', st.done === 6, st.text);
-    check('ex1 done note shown', /repeat that loop/.test(st.text), st.text);
-    check('ex1 graph has 2 commits', win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 2);
-    check('ex1 repo column shows 2 commits',
-      /2 commits/.test(win.document.querySelectorAll('#' + id + ' .gs-col')[2].textContent));
-  }
-
-  /* ---------------- exercise 2 (diffs) ---------------- */
-  {
-    const id = ID2;
-    const type = typer(win, id);
     const diffText = () => win.document.querySelector('#' + id + ' .gs-diff').textContent;
-    check('ex2 seeded with 2 commits',
+    check('anatomy seeded with 2 commits',
       win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 2,
       String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
-    check('ex2 diff panel starts clean', /clean/.test(diffText()), diffText());
+    check('anatomy starts at 0 done', tasksState(win, id).done === 0, tasksState(win, id).text);
+    check('anatomy has 4 tasks', tasksState(win, id).total === 4);
+    check('anatomy diff panel starts clean', /clean/.test(diffText()), diffText());
 
-    await type('echo "sales_by_region <- count(sales, region)" >> analysis.R');
-    check('ex2 panel shows the modified file',
-      /analysis\.R/.test(diffText()) && /modified/.test(diffText()), diffText());
-    check('ex2 panel shows the added line', /sales_by_region/.test(diffText()), diffText());
-    check('ex2 task 1 ticks', tasksState(win, id).done >= 1, tasksState(win, id).text);
+    await type('git status');
+    check('anatomy task 1 ticks on status', tasksState(win, id).done >= 1, tasksState(win, id).text);
 
-    await type('git diff');
-    check('ex2 terminal diff shows the same addition',
-      /\+sales_by_region/.test(outText(win, id)), outText(win, id).slice(-200));
-
-    await type('echo "## Data sources" > notes.md');
-    check('ex2 new file appears in panel',
-      /notes\.md/.test(diffText()) && /new/.test(diffText()), diffText());
-
-    await type('rm scratch.R');
-    check('ex2 deleted file appears in panel',
-      /scratch\.R/.test(diffText()) && /deleted/.test(diffText()), diffText());
+    await type('echo "A new line." >> README.md');
+    check('anatomy edit shows in diff panel',
+      /README\.md/.test(diffText()) && /A new line/.test(diffText()), diffText());
+    check('anatomy task 2 ticks on edit', tasksState(win, id).done >= 2, tasksState(win, id).text);
 
     await type('git add .');
-    await type('git commit -m "Summarise sales by region"');
+    check('anatomy staged chip in staging column',
+      /README\.md/.test(win.document.querySelectorAll('#' + id + ' .gs-col')[1].textContent),
+      win.document.querySelectorAll('#' + id + ' .gs-col')[1].textContent);
+    check('anatomy task 3 ticks on stage', tasksState(win, id).done >= 3, tasksState(win, id).text);
+
+    await type('git commit -m "Extend the README"');
     const st = tasksState(win, id);
-    check('ex2 all 5 tasks complete', st.done === 5, st.text);
-    check('ex2 panel clean after commit', /clean/.test(diffText()), diffText());
-  }
-
-  /* ---------------- exercise 3 ---------------- */
-  {
-    const id = ID3;
-    const type = typer(win, id);
-    check('ex3 seeded with 2 commits',
-      win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 2,
-      String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
-    check('ex3 seeded tree is clean',
-      /empty/.test(win.document.querySelectorAll('#' + id + ' .gs-col')[0].textContent));
-
-    await type('git log --oneline');
-    check('ex3 log shows seeded messages', /Start the analysis script/.test(outText(win, id)));
-
-    await type('git checkout -b report');
-    check('ex3 task 1 ticks', tasksState(win, id).done >= 1, tasksState(win, id).text);
-
-    await type('echo "# Q3 findings" > report.qmd');
-    await type('git add .');
-    await type('git commit -m "Draft the Q3 report"');
-    check('ex3 task 2 ticks', tasksState(win, id).done >= 2, tasksState(win, id).text);
-
-    await type('git checkout main');
-    await type('ls');
-    check('ex3 report.qmd absent on main', !/report\.qmd/.test(outText(win, id).split('$ ls').pop()),
-      outText(win, id).split('$ ls').pop().slice(0, 120));
-    check('ex3 task 3 ticks', tasksState(win, id).done >= 3, tasksState(win, id).text);
-
-    await type('git merge report');
-    check('ex3 merge is a fast-forward', /Fast-forward/.test(outText(win, id)), outText(win, id).slice(-200));
-    const st = tasksState(win, id);
-    check('ex3 all 4 tasks complete', st.done === 4, st.text);
-    check('ex3 fast-forward note shown', /fast-forward merge/i.test(st.text), st.text);
-    check('ex3 graph still linear (3 commits, 1 lane)',
+    check('anatomy all 4 tasks complete', st.done === 4, st.text);
+    check('anatomy done note shown', /feedback loop/.test(st.text), st.text);
+    check('anatomy graph has 3 commits',
       win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 3);
   }
 
-  /* ---------------- exercise 4 (just merge) ---------------- */
+  /* ---------------- box 2: minimal block ---------------- */
+  {
+    const id = ID2;
+    const type = typer(win, id);
+    check('minimal starts with no repo',
+      /No commits yet/.test(win.document.querySelector('#' + id + ' .gs-graph').textContent));
+    check('minimal has 4 hint buttons', win.document.querySelectorAll('#' + id + ' .gs-hint').length === 4);
+    check('minimal remote panel hidden', win.document.querySelector('#' + id + ' .gs-remote').hidden === true);
+
+    await type('git init');
+    check('minimal task 1 ticks', tasksState(win, id).done >= 1, tasksState(win, id).text);
+    check('minimal prompt shows branch',
+      /\(main\)/.test(win.document.querySelector('#' + id + ' .gs-prompt').textContent));
+
+    await type('echo "hello" > notes.txt');
+    await type('git add notes.txt');
+    await type('git commit -m "First note"');
+    const st = tasksState(win, id);
+    check('minimal both tasks complete', st.done === 2, st.text);
+    check('minimal graph has 1 commit',
+      win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 1);
+  }
+
+  /* ---------------- box 3: when-language playground ---------------- */
+  {
+    const id = ID3;
+    const type = typer(win, id);
+    check('playground seeded with 1 commit',
+      win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 1,
+      String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
+
+    await type('git checkout -b docs');
+    check('playground branch condition ticks', tasksState(win, id).done >= 1, tasksState(win, id).text);
+
+    await type('echo "## Setup" > SETUP.md');
+    check('playground file-contains condition ticks', tasksState(win, id).done >= 2, tasksState(win, id).text);
+
+    await type('git add .');
+    await type('git commit -m "Describe the setup"');
+    await type('git checkout main');
+    await type('git merge docs');
+    const st = tasksState(win, id);
+    check('playground all 3 tasks complete', st.done === 3, st.text);
+    check('playground merge was fast-forward (2 commits)',
+      win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 2);
+  }
+
+  /* ---------------- box 4: merge flow ---------------- */
   {
     const id = ID4;
     const type = typer(win, id);
-    check('ex4 seeded with 3 commits',
-      win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 3,
-      String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
-    check('ex4 starts on main', /\(main\)/.test(win.document.querySelector('#' + id + ' .gs-prompt').textContent));
-
-    await type('git branch');
-    check('ex4 plots branch exists', /plots/.test(outText(win, id)));
-    await type('git log --oneline');
-    check('ex4 task 1 ticks', tasksState(win, id).done >= 1, tasksState(win, id).text);
-
-    await type('git merge plots');
-    check('ex4 merge made a merge commit', /Merge made by/.test(outText(win, id)), outText(win, id).slice(-200));
-
-    await type('ls');
-    const lsOut = outText(win, id).split('$ ls').pop();
-    check('ex4 plots.R present after merge', /plots\.R/.test(lsOut), lsOut.slice(0, 120));
-
-    await type('git branch -d plots');
-    const st = tasksState(win, id);
-    check('ex4 all 4 tasks complete', st.done === 4, st.text);
-    check('ex4 graph has 4 commits',
-      win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 4,
-      String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
-    check('ex4 has a merge node (hollow circle)',
-      Array.from(win.document.querySelectorAll('#' + id + ' .gs-graph circle'))
-        .some(c => c.getAttribute('fill') === '#FFFFFF'));
-  }
-
-  /* ---------------- exercise 5 ---------------- */
-  {
-    const id = ID5;
-    const type = typer(win, id);
-    check('ex5 seeded with a diverged branch',
+    check('merge-flow seeded with a diverged branch',
       win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 3,
       String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
     await type('git branch');
-    check('ex5 forecast branch exists', /forecast/.test(outText(win, id)));
-    check('ex5 starts on main', /\(main\)/.test(win.document.querySelector('#' + id + ' .gs-prompt').textContent));
-    check('ex5 no tasks ticked at start', tasksState(win, id).done === 0, tasksState(win, id).text);
+    check('merge-flow forecast branch exists', /forecast/.test(outText(win, id)));
+    check('merge-flow starts on main', /\(main\)/.test(win.document.querySelector('#' + id + ' .gs-prompt').textContent));
 
     await type('echo "fixed the parser" > hotfix.md');
     await type('git add .');
     await type('git commit -m "Fix the date parsing"');
-    check('ex5 task 1 ticks (branches diverged)', tasksState(win, id).done >= 1, tasksState(win, id).text);
+    check('merge-flow task 1 ticks (branches diverged)', tasksState(win, id).done >= 1, tasksState(win, id).text);
 
     await type('git merge forecast');
-    check('ex5 merge made a merge commit', /Merge made by/.test(outText(win, id)), outText(win, id).slice(-200));
-    check('ex5 tasks 2 and 3 tick', tasksState(win, id).done >= 3, tasksState(win, id).text);
+    check('merge-flow merge made a merge commit', /Merge made by/.test(outText(win, id)), outText(win, id).slice(-200));
+    check('merge-flow tasks 2 and 3 tick', tasksState(win, id).done >= 3, tasksState(win, id).text);
 
     await type('ls');
     const lsOut = outText(win, id).split('$ ls').pop();
-    check('ex5 both branches\' files present after merge',
+    check('merge-flow both branches\' files present after merge',
       /forecast\.R/.test(lsOut) && /hotfix\.md/.test(lsOut), lsOut.slice(0, 160));
 
     await type('git branch -d forecast');
     const st = tasksState(win, id);
-    check('ex5 all 4 tasks complete', st.done === 4, st.text);
-    check('ex5 graph has 5 commits',
+    check('merge-flow all 4 tasks complete', st.done === 4, st.text);
+    check('merge-flow graph has 5 commits',
       win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 5,
       String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
-    check('ex5 has a merge node (hollow circle)',
+    check('merge-flow has a merge node (hollow circle)',
       Array.from(win.document.querySelectorAll('#' + id + ' .gs-graph circle'))
         .some(c => c.getAttribute('fill') === '#FFFFFF'));
 
     // reset button restores the seeded state
     win.document.querySelector('#' + id + ' .gs-reset').dispatchEvent(new win.Event('click'));
     await sleep(600);
-    check('ex5 reset restores the seed (3 commits)',
+    check('merge-flow reset restores the seed (3 commits)',
       win.document.querySelectorAll('#' + id + ' .gs-graph circle').length === 3,
       String(win.document.querySelectorAll('#' + id + ' .gs-graph circle').length));
-    check('ex5 reset unticks tasks', tasksState(win, id).done === 0, tasksState(win, id).text);
+    check('merge-flow reset unticks tasks', tasksState(win, id).done === 0, tasksState(win, id).text);
   }
 
-  /* ---------------- exercise 6 (remote: pull, work, push) ---------------- */
+  /* ---------------- box 5: remote flow (pull, work, push) ---------------- */
   {
-    const id = ID6;
+    const id = ID5;
     const type = typer(win, id);
     const remoteEl = () => win.document.querySelector('#' + id + ' .gs-remote');
     const remoteCircles = () => win.document.querySelectorAll('#' + id + ' .gs-remote-graph circle').length;
     const localCircles = () => win.document.querySelectorAll('#' + id + ' .gs-graph circle').length;
     const syncText = () => win.document.querySelector('#' + id + ' .gs-remote-sync').textContent;
 
-    check('ex6 remote panel is visible', !remoteEl().hidden);
-    check('ex6 remote seeded ahead: 2 remote vs 1 local',
+    check('remote-flow panel is visible', !remoteEl().hidden);
+    check('remote-flow seeded ahead: 2 remote vs 1 local',
       remoteCircles() === 2 && localCircles() === 1,
       'remote=' + remoteCircles() + ' local=' + localCircles());
-    check('ex6 sync line says pull', /git pull/.test(syncText()), syncText());
+    check('remote-flow sync line says pull', /git pull/.test(syncText()), syncText());
 
     await type('git push');
-    check('ex6 stale push rejected', /\[rejected\]/.test(outText(win, id)) && /fetch first/.test(outText(win, id)),
+    check('remote-flow stale push rejected', /\[rejected\]/.test(outText(win, id)) && /fetch first/.test(outText(win, id)),
       outText(win, id).slice(-250));
 
     await type('git fetch');
-    check('ex6 task 1 ticks after fetch', tasksState(win, id).done >= 1, tasksState(win, id).text);
-    check('ex6 origin/main pill appears locally', /origin\/main/.test(win.document.querySelector('#' + id + ' .gs-graph').textContent),
+    check('remote-flow task 1 ticks after fetch', tasksState(win, id).done >= 1, tasksState(win, id).text);
+    check('remote-flow origin/main pill appears locally',
+      /origin\/main/.test(win.document.querySelector('#' + id + ' .gs-graph').textContent),
       win.document.querySelector('#' + id + ' .gs-graph').textContent);
 
     await type('git pull');
-    check('ex6 pull fast-forwards', /Fast-forward/.test(outText(win, id)), outText(win, id).slice(-200));
-    check('ex6 local caught up', localCircles() === 2, String(localCircles()));
-    check('ex6 task 2 ticks', tasksState(win, id).done >= 2, tasksState(win, id).text);
+    check('remote-flow pull fast-forwards', /Fast-forward/.test(outText(win, id)), outText(win, id).slice(-200));
+    check('remote-flow local caught up', localCircles() === 2, String(localCircles()));
+    check('remote-flow task 2 ticks', tasksState(win, id).done >= 2, tasksState(win, id).text);
 
     await type('echo "sales <- read_csv(\'sales.csv\')" > load.R');
     await type('git add .');
     await type('git commit -m "Load the sales data"');
-    check('ex6 task 3 ticks', tasksState(win, id).done >= 3, tasksState(win, id).text);
-    check('ex6 sync line says push', /git push/.test(syncText()), syncText());
+    check('remote-flow task 3 ticks', tasksState(win, id).done >= 3, tasksState(win, id).text);
+    check('remote-flow sync line says push', /git push/.test(syncText()), syncText());
 
     await type('git push');
     const st = tasksState(win, id);
-    check('ex6 all 4 tasks complete', st.done === 4, st.text);
-    check('ex6 graphs agree', remoteCircles() === 3 && localCircles() === 3,
+    check('remote-flow all 4 tasks complete', st.done === 4, st.text);
+    check('remote-flow graphs agree', remoteCircles() === 3 && localCircles() === 3,
       'remote=' + remoteCircles() + ' local=' + localCircles());
-    check('ex6 sync line says in sync', /in sync/.test(syncText()), syncText());
+    check('remote-flow sync line says in sync', /in sync/.test(syncText()), syncText());
   }
 
-  /* ---------------- isolation between exercises ---------------- */
-  check('exercise 1 unaffected by later exercises',
-    win.document.querySelectorAll('#' + ID1 + ' .gs-graph circle').length === 2);
-  check('exercise 3 unaffected by later exercises',
-    win.document.querySelectorAll('#' + ID3 + ' .gs-graph circle').length === 3);
+  /* ---------------- isolation between boxes ---------------- */
+  check('box 1 unaffected by later boxes',
+    win.document.querySelectorAll('#' + ID1 + ' .gs-graph circle').length === 3);
+  check('box 2 unaffected by later boxes',
+    win.document.querySelectorAll('#' + ID2 + ' .gs-graph circle').length === 1);
   check('no authoring errors anywhere on the page',
     win.document.querySelectorAll('.gs-task-broken, .gs-config-error').length === 0,
     win.document.querySelector('.gs-task-err') ? win.document.querySelector('.gs-task-err').textContent : '');
 
   /* ---------------- page-level checks ---------------- */
   check('no page script errors', consoleErrors.length === 0, consoleErrors.join('\n     '));
-  check('lesson title present', /Version control with Git/.test(win.document.title), win.document.title);
-  check('command reference table present',
-    win.document.querySelectorAll('table').length >= 1);
+  check('guide title present', /Building interactive Git exercises/.test(win.document.title), win.document.title);
+  check('copyable block source is shown on the page',
+    /```git-sandbox/.test(win.document.body.textContent));
   check('all sandboxes have an accessible label',
     Array.from(win.document.querySelectorAll('.gs-input')).every(i => i.getAttribute('aria-label')));
   check('terminal output is a live region',
