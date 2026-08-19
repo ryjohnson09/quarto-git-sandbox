@@ -81,10 +81,7 @@
 
 .gs-body {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-}
-@media (max-width: 900px) {
-  .gs-body { grid-template-columns: minmax(0, 1fr); }
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* ------------------------------ terminal ----------------------------- */
@@ -93,13 +90,13 @@
   background: var(--gs-blue-600);
   display: flex;
   flex-direction: column;
-  min-height: 340px;
+  height: 340px;
 }
 
 .gs-out {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  max-height: 380px;
   padding: 14px 16px 4px;
   font-family: var(--gs-mono);
   font-size: 13.5px;
@@ -182,11 +179,8 @@
 
 .gs-viz {
   padding: 14px 16px 18px;
-  border-left: 1px solid var(--gs-blue-50);
+  border-top: 1px solid var(--gs-blue-50);
   min-width: 0;
-}
-@media (max-width: 900px) {
-  .gs-viz { border-left: 0; border-top: 1px solid var(--gs-blue-50); }
 }
 
 .gs-viz-h {
@@ -254,33 +248,102 @@
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  font-size: 14px;
-  color: var(--gs-blue);
-  padding: 0 2px;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--gs-blue-vibrant);
 }
 .gs-arrow span {
   font-family: var(--gs-mono);
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  color: var(--gs-gray-body);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--gs-blue-500);
   white-space: nowrap;
-  transform: rotate(-90deg);
-  margin-bottom: 14px;
+  background: var(--gs-blue-50);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.gs-arrow-g {
+  font-style: normal;
+  line-height: 1;
+  display: inline-block;
 }
 @media (max-width: 560px) {
   .gs-stages { grid-template-columns: 1fr; }
-  .gs-arrow { flex-direction: row; gap: 6px; padding: 2px 0; }
-  .gs-arrow span { transform: none; margin: 0; }
+  .gs-arrow { flex-direction: row; gap: 8px; padding: 4px 0; font-size: 18px; }
+  .gs-arrow-g { transform: rotate(90deg); }
 }
+
+/* changes (diff panel) */
+
+.gs-diff-empty { font-size: 13px; color: var(--gs-gray-body); }
+.gs-diff-empty code { font-family: var(--gs-mono); font-size: 12px; }
+
+.gs-diff-file {
+  border: 1px solid var(--gs-blue-50);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.gs-diff-file:last-child { margin-bottom: 0; }
+
+.gs-diff-filehead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--gs-off-white);
+  border-bottom: 1px solid var(--gs-blue-50);
+}
+.gs-diff-name { font-family: var(--gs-mono); font-size: 12px; color: var(--gs-blue-500); }
+.gs-diff-kind {
+  font-family: var(--gs-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 8px;
+  border-radius: 9px;
+  background: var(--gs-blue-50);
+  color: var(--gs-blue-500);
+}
+.gs-diff-kind-new     { background: #E7EEDD; color: #4C6A2F; }
+.gs-diff-kind-deleted { background: #FADFD6; color: #9C3D1B; }
+
+.gs-diff-line {
+  display: grid;
+  grid-template-columns: 2.4em 2.4em 1.1em minmax(0, 1fr);
+  font-family: var(--gs-mono);
+  font-size: 12px;
+  line-height: 1.75;
+}
+.gs-diff-num  { text-align: right; padding-right: 8px; color: var(--gs-gray-body); opacity: 0.7; user-select: none; }
+.gs-diff-sign { user-select: none; }
+.gs-diff-text { white-space: pre-wrap; word-break: break-word; padding-right: 8px; }
+.gs-diff-add { background: #EFF4E7; }
+.gs-diff-add .gs-diff-sign, .gs-diff-add .gs-diff-text { color: #4C6A2F; }
+.gs-diff-del { background: #FBECE6; }
+.gs-diff-del .gs-diff-sign, .gs-diff-del .gs-diff-text { color: #9C3D1B; }
 
 /* graph */
 
-.gs-graph-scroll { overflow-x: auto; }
-.gs-graph { display: block; width: 100%; min-width: 460px; }
+.gs-graph-scroll { overflow-x: hidden; }
+.gs-graph { display: block; width: 100%; }
 .gs-sha  { font-family: var(--gs-mono); font-size: 12px; fill: var(--gs-gray-body); }
 .gs-msg  { font-family: var(--gs-font); font-size: 13px; fill: var(--gs-gray); }
 .gs-ref  { font-family: var(--gs-mono); font-size: 11px; fill: var(--gs-blue-500); }
 .gs-ref-head { fill: #FFFFFF; }
+.gs-ref-remote { fill: var(--gs-gray-body); }
+
+/* remote (mock origin) */
+
+.gs-remote {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--gs-blue-100);
+}
+.gs-remote-sync { font-size: 12px; color: var(--gs-gray-body); margin-top: 2px; }
+.gs-remote-sync code { font-family: var(--gs-mono); font-size: 11px; }
 .gs-empty-text { font-family: var(--gs-font); font-size: 13px; fill: var(--gs-gray-body); }
 
 /* ------------------------------- tasks -------------------------------- */

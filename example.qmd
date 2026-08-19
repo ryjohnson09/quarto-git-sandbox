@@ -112,6 +112,53 @@ commits newest first, and `git diff` shows what has changed in your
 working directory since the last commit — worth running before every
 commit, as a last look at what you are about to record.
 
+## Seeing what changed
+
+A **diff** is Git's answer to "what exactly is different?" It compares two
+versions of a file line by line. A line that exists only in the newer
+version is an addition (`+`, shown in green); a line that exists only in
+the older one is a removal (`-`, shown in red). An edited line appears as
+both — Git sees it as removing the old line and adding the new one.
+
+You will read diffs constantly: before committing, when reviewing a
+colleague's work, and when tracking down which change broke something.
+The **Changes since last commit** panel in each exercise shows the diff
+live — edit any tracked file and the difference against your last commit
+appears immediately. `git diff` prints the same information in the
+terminal. New and deleted files are diffs too: a new file is all
+additions, a deleted file all removals.
+
+```git-sandbox
+id: reading-diffs
+title: Exercise 2 — see what changed
+prompt: "~/sales-analysis $"
+intro: |
+  This project has two commits. Keep an eye on the {y}Changes since last
+  commit{/} panel as you edit, create, and delete files.
+hints: ['echo "sales_by_region <- count(sales, region)" >> analysis.R', git diff, 'echo "## Data sources" > notes.md', rm scratch.R, git add ., 'git commit -m "Summarise sales by region"']
+done-note: Clean again — the diff always measures against your latest commit, so committing moves the baseline forward.
+seed: |
+  git init
+  echo "# Sales analysis" > README.md
+  git add .
+  git commit -m "Add the project README"
+  echo "library(tidyverse)" > analysis.R
+  echo "print('debug me')" > scratch.R
+  git add .
+  git commit -m "Start the analysis script"
+tasks:
+  - text: Append a line to `analysis.R` and find it as a green `+` line in the panel
+    when: file analysis.R contains "sales_by_region"
+  - text: Print the same diff in the terminal with `git diff`
+    when: ran /^\s*git\s+diff\s*$/
+  - text: Create a new file, for example `notes.md` — a new file is all additions
+    when: file notes.md
+  - text: Delete `scratch.R` with `rm scratch.R` — a deletion is a diff too
+    when: not file scratch.R
+  - text: Stage and commit everything, and watch the panel come back clean
+    when: commits >= 3 and clean
+```
+
 ## Trying something without breaking anything
 
 So far the history is a straight line. Branches let it fork.
@@ -131,7 +178,7 @@ you are on.
 
 ```git-sandbox
 id: branching
-title: Exercise 2 — work on a branch
+title: Exercise 3 — work on a branch
 prompt: "~/sales-analysis $"
 intro: |
   This project already has some history. Run {y}git log --oneline{/} to see it.
@@ -179,9 +226,53 @@ without help. It asks you to intervene only when two branches changed the
 same lines — a merge conflict. Conflicts are normal, not a sign you did
 something wrong, and they are the subject of the next lesson.
 
+Most days, the merge itself is the easy part. The work happened on the
+branch, commit by commit; by the time you type `git merge`, everything is
+already recorded. In this exercise a colleague's `plots` branch is
+finished, and `main` has moved on since they branched — the history has
+two lanes. All that is left is to bring the work in.
+
+```git-sandbox
+id: just-merge
+title: Exercise 4 — merge a finished branch
+prompt: "~/sales-analysis $"
+intro: |
+  The {y}plots{/} branch is finished and ready. Look at the commit history:
+  two lanes, because {y}main{/} moved on after the branch was made.
+  Look around first, then merge.
+hints: [git branch, git log --oneline, git merge plots, ls, git branch -d plots]
+done-note: One command, because the work was already committed on the branch. The merge commit now ties the two lanes together.
+seed: |
+  git init
+  echo "# Sales analysis" > README.md
+  git add .
+  git commit -m "Add the project README"
+  git checkout -b plots
+  echo "ggplot(sales, aes(month, revenue)) + geom_line()" > plots.R
+  git add .
+  git commit -m "Add the revenue trend plot"
+  git checkout main
+  echo "sales <- read_csv('sales.csv')" > analysis.R
+  git add .
+  git commit -m "Load the sales data"
+tasks:
+  - text: Get your bearings with `git branch` and `git log --oneline`
+    when: ran /git\s+(branch|log)/
+  - text: Merge `plots` into `main`
+    when: on main and merged plots into main
+  - text: Confirm `plots.R` arrived with `ls`
+    when: merged plots into main and ran /^\s*ls\s*$/
+  - text: 'Tidy up: delete the merged branch with `git branch -d plots`'
+    when: not branch plots and ran /git\s+branch\s+-[dD]/
+```
+
+That merge produced a merge commit because the branches had diverged. In
+the next exercise you drive the whole story yourself: create the
+divergence on `main`, then resolve it.
+
 ```git-sandbox
 id: merging
-title: Exercise 3 — a real merge
+title: Exercise 5 — a real merge
 prompt: "~/sales-analysis $"
 intro: |
   A colleague has been working on the {y}forecast{/} branch while you fix things on {y}main{/}.
@@ -212,6 +303,63 @@ tasks:
     when: not branch forecast and ran /git\s+branch\s+-[dD]/
 ```
 
+## Sharing your work
+
+Everything so far lives on one machine. A **remote** is a copy of the
+repository somewhere shared — GitHub, GitLab, or an internal server — that
+the whole team pushes to and pulls from.
+
+Three commands keep your repository and the remote in step. `git push`
+uploads your new commits to the remote. `git fetch` downloads what is new
+on the remote without touching your work — after a fetch, `origin/main` in
+your history shows where the remote is. `git pull` does both halves of the
+conversation at once: fetch, then merge the remote's commits into your
+branch.
+
+The first push needs one extra flag: `git push -u origin main` tells Git
+that your `main` and the remote's `main` belong together. After that,
+plain `git push` and `git pull` know where to go. And the remote protects
+itself: if a colleague pushed while you were working, your push is
+rejected until you pull their commits — Git will never silently discard
+work on the shared copy.
+
+The exercise below has a mock GitHub remote running inside the page. Its
+history is drawn separately, under **Remote — origin**, so you can watch
+commits travel in both directions.
+
+```git-sandbox
+id: push-pull
+title: Exercise 6 — pull, work, push
+prompt: "~/sales-analysis $"
+intro: |
+  While you were away, a colleague pushed a commit to the shared repository.
+  Compare {y}Commit history{/} with {y}Remote — origin{/}: the remote is ahead.
+  (Try {y}git push{/} first if you want to see what a rejected push looks like.)
+hints: [git fetch, git pull, git log --oneline, 'echo "sales <- read_csv(\"sales.csv\")" > load.R', git add ., 'git commit -m "Load the sales data"', git push]
+done-note: Pull, work, push — that loop is the whole rhythm of working with a team. The graphs match again because both copies now tell the same story.
+seed: |
+  git init
+  git remote add origin https://github.com/acme/sales-analysis
+  echo "# Sales analysis" > README.md
+  git add .
+  git commit -m "Add the project README"
+  git push -u origin main
+  echo "arima(sales)" > forecast.R
+  git add .
+  git commit -m "Add a first forecast model"
+  git push
+  rewind 1
+tasks:
+  - text: Ask the remote what is new with `git fetch`, and watch `origin/main` move in your history
+    when: ran /^\s*git\s+fetch\s*$/
+  - text: Bring the colleague's commit into your branch with `git pull`
+    when: commits on main >= 2
+  - text: Do your own work — create a file, stage it, commit it
+    when: commits on main >= 3
+  - text: Publish it with `git push`, and check the two graphs agree
+    when: commits on main >= 3 and pushed
+```
+
 ## Command reference
 
 | Command | What it does |
@@ -228,16 +376,20 @@ tasks:
 | `git checkout <name>` | Switch to an existing branch |
 | `git merge <name>` | Merge a branch into the current one |
 | `git branch -d <name>` | Delete a branch you have already merged |
+| `git remote add origin <url>` | Connect the repository to a remote |
+| `git push` | Upload your new commits (`-u origin <branch>` the first time) |
+| `git fetch` | See what is new on the remote without changing your work |
+| `git pull` | Fetch the remote's commits and merge them into your branch |
 
 : {tbl-colwidths="[36,64]"}
 
 ## Where to go next
 
-Everything so far happens on one machine. The next lesson adds a remote —
-a shared copy on GitHub, GitLab, or an internal server — and the two
-commands that keep it in step, `git push` and `git pull`. That is the
-point where version control becomes collaboration, and where pull requests
-and code review fit in.
+You now have the full solo loop and the collaboration loop: commit, branch,
+merge, pull, push. The next lesson picks up where the push/pull exercise
+left off — what happens when you and a colleague change the *same lines*
+and Git asks you to resolve a merge conflict, and where pull requests and
+code review fit into the rhythm you just practised.
 
 Three habits are worth starting now:
 

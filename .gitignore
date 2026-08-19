@@ -6,3 +6,5 @@ example.html
 example_files/
 tests/graph-preview.svg
 tests/*.html
+
+/.luarc.json

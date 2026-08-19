@@ -284,6 +284,15 @@
 
     var fs = createMemFS();
     var dir = options.dir || '/project';
+    // Path shown to the user in messages and pwd; the real in-memory fs
+    // stays rooted at `dir` regardless of what the prompt displays.
+    var displayDir = options.displayDir || '~' + dir;
+    // Mock remote: a bare repository elsewhere in the same in-memory fs,
+    // created by `git remote add origin <url>`. Push/pull/fetch move objects
+    // and refs between it and the local repo — nothing leaves the page.
+    var remoteGitdir = '/origin';
+    var remoteUrl = null;
+    var upstreams = {};   // branch name -> true once `push -u` recorded it
     var author = { name: 'Your Name', email: 'you@example.com' };
     var defaultBranch = options.defaultBranch || 'main';
     var repoReady = false;
@@ -331,27 +340,70 @@
       return out.sort();
     }
 
+    /* ------------------------------ remote -------------------------- */
+
+    // options builder for commands that read the remote's bare repo
+    function ropts(extra) {
+      var o = { fs: fs, gitdir: remoteGitdir };
+      for (var k in extra) o[k] = extra[k];
+      return o;
+    }
+
+    async function remoteBranchOid(name) {
+      try { return (await fs.promises.readFile(remoteGitdir + '/refs/heads/' + name, 'utf8')).trim(); }
+      catch (e) { return null; }
+    }
+
+    async function listRemoteBranchNames() {
+      try { return (await fs.promises.readdir(remoteGitdir + '/refs/heads')).sort(); }
+      catch (e) { return []; }
+    }
+
+    // Copy every git object file present under `from` but missing under `to`.
+    // Both repos live in the same in-memory fs, so a push/fetch "transfer"
+    // is a plain file copy.
+    async function copyObjects(fromGitdir, toGitdir) {
+      var prefix = fromGitdir + '/objects/';
+      var paths = [];
+      fs._store.forEach(function (v, k) {
+        if (v.type === 'file' && k.indexOf(prefix) === 0) paths.push(k);
+      });
+      for (var i = 0; i < paths.length; i++) {
+        var dest = toGitdir + paths[i].slice(fromGitdir.length);
+        try { await fs.promises.stat(dest); continue; } catch (e) { /* missing: copy */ }
+        await fs.promises.mkdir(dest.slice(0, dest.lastIndexOf('/')), { recursive: true });
+        await fs.promises.writeFile(dest, await fs.promises.readFile(paths[i]));
+      }
+    }
+
+    // set of commit oids reachable from `oid`, read via the given options builder
+    async function reachableFrom(oid, optsFn) {
+      var seen = {};
+      var queue = [oid];
+      while (queue.length) {
+        var o = queue.shift();
+        if (!o || seen[o]) continue;
+        var c;
+        try { c = await gitlib.readCommit(optsFn({ oid: o })); } catch (e) { continue; }
+        seen[o] = true;
+        (c.commit.parent || []).forEach(function (p) { queue.push(p); });
+      }
+      return seen;
+    }
+
+    async function setTrackingRef(branch, oid) {
+      await gitlib.writeRef(opts({ ref: 'refs/remotes/origin/' + branch, value: oid, force: true }));
+    }
+
     /* ------------------------- graph model ------------------------- */
 
-    async function graphModel() {
-      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false };
-
-      var branches = await gitlib.listBranches(opts());
-      var head = await currentBranch();
-      var refs = {};
-      var seeds = [];
-
-      for (var i = 0; i < branches.length; i++) {
-        try {
-          var oid = await gitlib.resolveRef(opts({ ref: branches[i] }));
-          refs[branches[i]] = oid;
-          seeds.push(oid);
-        } catch (e) { /* unborn branch */ }
-      }
-      // include HEAD in case it is detached
-      var headOid = null;
-      try { headOid = await gitlib.resolveRef(opts({ ref: 'HEAD' })); if (headOid) seeds.push(headOid); }
-      catch (e) { /* no commits yet */ }
+    // Shared commit-graph builder. refEntries: [{ name, oid, isHead, remote }].
+    // Walks history from the given refs (plus extraSeeds), reading commits
+    // with optsFn — opts for the local repo, ropts for the remote.
+    async function buildGraph(refEntries, extraSeeds, optsFn) {
+      var seeds = refEntries.map(function (e) { return e.oid; })
+        .concat(extraSeeds || [])
+        .filter(Boolean);
 
       var seen = new Map();
       var queue = seeds.slice();
@@ -359,7 +411,7 @@
         var oid2 = queue.shift();
         if (!oid2 || seen.has(oid2)) continue;
         var c;
-        try { c = await gitlib.readCommit(opts({ oid: oid2 })); }
+        try { c = await gitlib.readCommit(optsFn({ oid: oid2 })); }
         catch (e) { continue; }
         seen.set(oid2, {
           oid: oid2,
@@ -402,9 +454,9 @@
         commits = all.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
       }
 
-      Object.keys(refs).forEach(function (name) {
-        var node = seen.get(refs[name]);
-        if (node) node.refs.push({ name: name, isHead: name === head });
+      refEntries.forEach(function (e) {
+        var node = seen.get(e.oid);
+        if (node) node.refs.push({ name: e.name, isHead: !!e.isHead, remote: !!e.remote });
       });
 
       // lane assignment: walk newest -> oldest keeping a set of open lanes
@@ -430,12 +482,83 @@
         }
       });
 
+      return commits;
+    }
+
+    async function graphModel() {
+      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false };
+
+      var branches = await gitlib.listBranches(opts());
+      var head = await currentBranch();
+      var refs = {};
+      var refEntries = [];
+
+      for (var i = 0; i < branches.length; i++) {
+        try {
+          var oid = await gitlib.resolveRef(opts({ ref: branches[i] }));
+          refs[branches[i]] = oid;
+          refEntries.push({ name: branches[i], oid: oid, isHead: branches[i] === head });
+        } catch (e) { /* unborn branch */ }
+      }
+
+      // remote-tracking refs (origin/*) appear as grey pills, like real git log
+      if (remoteUrl) {
+        var tracked = [];
+        try { tracked = await fs.promises.readdir(dir + '/.git/refs/remotes/origin'); } catch (e) {}
+        for (var t = 0; t < tracked.length; t++) {
+          try {
+            var toid = await gitlib.resolveRef(opts({ ref: 'refs/remotes/origin/' + tracked[t] }));
+            refEntries.push({ name: 'origin/' + tracked[t], oid: toid, remote: true });
+          } catch (e) { /* dangling tracking ref */ }
+        }
+      }
+
+      // include HEAD in case it is detached
+      var headOid = null;
+      try { headOid = await gitlib.resolveRef(opts({ ref: 'HEAD' })); }
+      catch (e) { /* no commits yet */ }
+
+      var commits = await buildGraph(refEntries, headOid ? [headOid] : [], opts);
+
       return {
         commits: commits,
         branches: branches.map(function (b) { return { name: b, oid: refs[b] || null, isHead: b === head }; }),
         head: head,
         headOid: headOid,
         detached: head === null && headOid !== null
+      };
+    }
+
+    // What the mock remote looks like "on GitHub": its own commit graph plus
+    // how the learner's current branch compares to it. Null until
+    // `git remote add origin <url>` has run.
+    async function remoteModel() {
+      if (!remoteUrl) return null;
+      var names = await listRemoteBranchNames();
+      var refEntries = [];
+      for (var i = 0; i < names.length; i++) {
+        refEntries.push({ name: 'origin/' + names[i], oid: await remoteBranchOid(names[i]), remote: true });
+      }
+      var commits = await buildGraph(refEntries, [], ropts);
+
+      var branch = await currentBranch();
+      var tracked = false, ahead = 0, behind = 0;
+      if (branch) {
+        var remoteOid = await remoteBranchOid(branch);
+        if (remoteOid) {
+          tracked = true;
+          var localOid = null;
+          try { localOid = await gitlib.resolveRef(opts({ ref: branch })); } catch (e) {}
+          var localSet = localOid ? await reachableFrom(localOid, opts) : {};
+          var remoteSet = await reachableFrom(remoteOid, ropts);
+          Object.keys(localSet).forEach(function (o) { if (!remoteSet[o]) ahead++; });
+          Object.keys(remoteSet).forEach(function (o) { if (!localSet[o]) behind++; });
+        }
+      }
+      return {
+        url: remoteUrl,
+        graph: { commits: commits, branches: names, head: null, detached: false },
+        branch: branch, tracked: tracked, ahead: ahead, behind: behind
       };
     }
 
@@ -488,10 +611,10 @@
 
       switch (sub) {
         case 'init': {
-          if (await isRepo()) return { out: 'Reinitialized existing Git repository in ' + dir + '/.git/', ok: true };
+          if (await isRepo()) return { out: 'Reinitialized existing Git repository in ' + displayDir + '/.git/', ok: true };
           await gitlib.init(opts({ defaultBranch: defaultBranch }));
           repoReady = true;
-          return { out: 'Initialized empty Git repository in ' + dir + '/.git/', ok: true };
+          return { out: 'Initialized empty Git repository in ' + displayDir + '/.git/', ok: true };
         }
 
         case 'config': {
@@ -592,6 +715,13 @@
           try { commits = await gitlib.log(opts({ depth: 50 })); }
           catch (e) { return { out: "fatal: your current branch does not have any commits yet", ok: false }; }
           if (!commits.length) return { out: 'fatal: your current branch does not have any commits yet', ok: false };
+          // isomorphic-git's log revisits shared history once per merge parent
+          var logSeen = {};
+          commits = commits.filter(function (c) {
+            if (logSeen[c.oid]) return false;
+            logSeen[c.oid] = true;
+            return true;
+          });
           var g = await graphModel();
           var refsByOid = {};
           g.commits.forEach(function (c) { if (c.refs.length) refsByOid[c.oid] = c.refs; });
@@ -620,7 +750,7 @@
           var cur = await currentBranch();
           if (del) {
             if (!names.length) return { out: 'fatal: branch name required', ok: false };
-            if (names[0] === cur) return { out: "error: cannot delete branch '" + names[0] + "' checked out at '" + dir + "'", ok: false };
+            if (names[0] === cur) return { out: "error: cannot delete branch '" + names[0] + "' checked out at '" + displayDir + "'", ok: false };
             if (all.indexOf(names[0]) === -1) return { out: "error: branch '" + names[0] + "' not found.", ok: false };
             await gitlib.deleteBranch(opts({ ref: names[0] }));
             return { out: "Deleted branch " + names[0], ok: true };
@@ -686,6 +816,121 @@
           return { out: "Merge made by the 'recursive' strategy.", ok: true };
         }
 
+        case 'remote': {
+          if (rest[0] === 'add') {
+            if (rest[1] !== 'origin' || !rest[2]) return { out: 'usage: git remote add origin <url>', ok: false };
+            if (remoteUrl) return { out: 'error: remote origin already exists.', ok: false };
+            await gitlib.init({ fs: fs, gitdir: remoteGitdir, bare: true, defaultBranch: defaultBranch });
+            remoteUrl = rest[2];
+            return { out: '', ok: true };
+          }
+          if (!rest.length) return { out: remoteUrl ? 'origin' : '', ok: true };
+          if (rest[0] === '-v') {
+            if (!remoteUrl) return { out: '', ok: true };
+            return { out: 'origin\t' + remoteUrl + ' (fetch)\norigin\t' + remoteUrl + ' (push)', ok: true };
+          }
+          return { out: 'usage: git remote [-v] | git remote add origin <url>', ok: false };
+        }
+
+        case 'push': {
+          if (!remoteUrl) return { out: 'fatal: No configured push destination.\nAdd a remote first: git remote add origin <url>', ok: false };
+          var setUp = rest.indexOf('-u') !== -1 || rest.indexOf('--set-upstream') !== -1;
+          var words = rest.filter(function (a) { return a.charAt(0) !== '-'; });
+          if (words[0] && words[0] !== 'origin') return { out: "fatal: '" + words[0] + "' does not appear to be a git repository", ok: false };
+          var pbr = words[1] || (await currentBranch());
+          if (!pbr) return { out: 'fatal: you are not currently on a branch.', ok: false };
+          var locals = await gitlib.listBranches(opts());
+          if (locals.indexOf(pbr) === -1) return { out: 'error: src refspec ' + pbr + ' does not match any', ok: false };
+          if (!words[1] && !upstreams[pbr]) {
+            return {
+              out: 'fatal: The current branch ' + pbr + ' has no upstream branch.\n' +
+                   'To push the current branch and set the remote as upstream, use\n\n' +
+                   '    git push -u origin ' + pbr,
+              ok: false
+            };
+          }
+          var localOid = await gitlib.resolveRef(opts({ ref: pbr }));
+          var remoteOid = await remoteBranchOid(pbr);
+          if (setUp) upstreams[pbr] = true;
+          if (remoteOid === localOid) return { out: 'Everything up-to-date', ok: true };
+          if (remoteOid) {
+            // only fast-forward pushes are allowed, like a real remote
+            var pushedSet = await reachableFrom(localOid, opts);
+            if (!pushedSet[remoteOid]) {
+              return {
+                out: 'To ' + remoteUrl + '\n' +
+                     ' {r}! [rejected]{/}        ' + pbr + ' -> ' + pbr + ' (fetch first)\n' +
+                     'hint: Updates were rejected because the remote contains work that you do\n' +
+                     'hint: not have locally. Pull the remote changes ({y}git pull{/}) before pushing again.',
+                ok: false
+              };
+            }
+          }
+          await copyObjects(dir + '/.git', remoteGitdir);
+          await fs.promises.mkdir(remoteGitdir + '/refs/heads', { recursive: true });
+          await fs.promises.writeFile(remoteGitdir + '/refs/heads/' + pbr, localOid + '\n');
+          await setTrackingRef(pbr, localOid);
+          var pushOut = ['To ' + remoteUrl];
+          pushOut.push(remoteOid
+            ? '   ' + remoteOid.slice(0, 7) + '..' + localOid.slice(0, 7) + '  ' + pbr + ' -> ' + pbr
+            : ' * [new branch]      ' + pbr + ' -> ' + pbr);
+          if (setUp) pushOut.push("branch '" + pbr + "' set up to track 'origin/" + pbr + "'.");
+          return { out: pushOut.join('\n'), ok: true };
+        }
+
+        case 'fetch': {
+          if (!remoteUrl) return { out: "fatal: 'origin' does not appear to be a git repository", ok: false };
+          var rnames = await listRemoteBranchNames();
+          await copyObjects(remoteGitdir, dir + '/.git');
+          var updated = [];
+          for (var fi = 0; fi < rnames.length; fi++) {
+            var rOid = await remoteBranchOid(rnames[fi]);
+            var cur = null;
+            try { cur = await gitlib.resolveRef(opts({ ref: 'refs/remotes/origin/' + rnames[fi] })); } catch (e) {}
+            if (cur === rOid) continue;
+            await setTrackingRef(rnames[fi], rOid);
+            updated.push(cur
+              ? '   ' + cur.slice(0, 7) + '..' + rOid.slice(0, 7) + '  ' + rnames[fi] + '       -> origin/' + rnames[fi]
+              : ' * [new branch]      ' + rnames[fi] + '       -> origin/' + rnames[fi]);
+          }
+          if (!updated.length) return { out: '', ok: true };
+          return { out: ['From ' + remoteUrl].concat(updated).join('\n'), ok: true };
+        }
+
+        case 'pull': {
+          if (!remoteUrl) return { out: "fatal: 'origin' does not appear to be a git repository", ok: false };
+          var lbr = await currentBranch();
+          if (!lbr) return { out: 'fatal: you are not currently on a branch.', ok: false };
+          var fetched = await gitCommand(['fetch']);
+          var theirOid = await remoteBranchOid(lbr);
+          if (!theirOid) return { out: "fatal: origin has no branch named '" + lbr + "' to pull from.", ok: false };
+          var oursOid = await gitlib.resolveRef(opts({ ref: lbr }));
+          var prefix2 = fetched.out ? fetched.out + '\n' : '';
+          if (theirOid === oursOid) return { out: prefix2 + 'Already up to date.', ok: true };
+          var pres;
+          try {
+            pres = await gitlib.merge(opts({
+              ours: lbr, theirs: 'refs/remotes/origin/' + lbr,
+              author: { name: author.name, email: author.email },
+              message: "Merge branch '" + lbr + "' of " + remoteUrl
+            }));
+          } catch (e) {
+            if (e.code === 'MergeNotSupportedError' || e.code === 'MergeConflictError') {
+              return {
+                out: prefix2 + 'CONFLICT: the remote changed the same lines you did.\n' +
+                     'Automatic merge failed. In this sandbox, conflicts are not resolvable yet —\n' +
+                     'try `reset` and take the guided path instead.',
+                ok: false
+              };
+            }
+            return { out: prefix2 + 'fatal: ' + e.message, ok: false };
+          }
+          await gitlib.checkout(opts({ ref: lbr, force: true }));
+          if (pres.alreadyMerged) return { out: prefix2 + 'Already up to date.', ok: true };
+          if (pres.fastForward) return { out: prefix2 + 'Updating ' + oursOid.slice(0, 7) + '..' + theirOid.slice(0, 7) + '\nFast-forward', ok: true };
+          return { out: prefix2 + "Merge made by the 'recursive' strategy.", ok: true };
+        }
+
         case 'diff': {
           var st3 = await statusModel();
           if (!st3.modified.length && !st3.untracked.length) return { out: '', ok: true };
@@ -710,17 +955,59 @@
       }
     }
 
-    function simpleDiff(oldTxt, newTxt) {
+    // Line-by-line diff as data: [{ t: ' '|'+'|'-', text, a, b }] where a/b
+    // are 1-based line numbers in the old/new file (absent on the other side).
+    function diffLines(oldTxt, newTxt) {
       var a = oldTxt.split('\n'), b = newTxt.split('\n');
       var out = [];
       var i = 0, j = 0;
       while (i < a.length || j < b.length) {
-        if (i < a.length && j < b.length && a[i] === b[j]) { out.push(' ' + a[i]); i++; j++; }
-        else if (j < b.length && (i >= a.length || a.indexOf(b[j], i) === -1)) { out.push('{g}+' + b[j] + '{/}'); j++; }
-        else if (i < a.length) { out.push('{r}-' + a[i] + '{/}'); i++; }
+        if (i < a.length && j < b.length && a[i] === b[j]) { out.push({ t: ' ', text: a[i], a: i + 1, b: j + 1 }); i++; j++; }
+        else if (j < b.length && (i >= a.length || a.indexOf(b[j], i) === -1)) { out.push({ t: '+', text: b[j], b: j + 1 }); j++; }
+        else if (i < a.length) { out.push({ t: '-', text: a[i], a: i + 1 }); i++; }
         else break;
       }
-      return out.join('\n');
+      return out;
+    }
+
+    function simpleDiff(oldTxt, newTxt) {
+      return diffLines(oldTxt, newTxt).map(function (l) {
+        if (l.t === '+') return '{g}+' + l.text + '{/}';
+        if (l.t === '-') return '{r}-' + l.text + '{/}';
+        return ' ' + l.text;
+      }).join('\n');
+    }
+
+    // Working directory vs the last commit, structured for rendering:
+    // { files: [{ file, kind: 'new'|'modified'|'deleted', lines: [...] }] }
+    // or null when there is no repository yet.
+    async function diffModel() {
+      if (!(await isRepo())) return null;
+      var headOid = null;
+      try { headOid = await gitlib.resolveRef(opts({ ref: 'HEAD' })); } catch (e) {}
+      var matrix = await gitlib.statusMatrix(opts());
+      var files = [];
+      for (var r = 0; r < matrix.length; r++) {
+        var file = matrix[r][0], head = matrix[r][1], workdir = matrix[r][2];
+        if (head === workdir) continue;                       // unchanged or absent
+        var kind = head === 0 ? 'new' : (workdir === 0 ? 'deleted' : 'modified');
+        var oldTxt = '', newTxt = '';
+        if (head === 1 && headOid) {
+          var blob = await gitlib.readBlob(opts({ oid: headOid, filepath: file }));
+          oldTxt = new TextDecoder().decode(blob.blob);
+        }
+        if (workdir !== 0) newTxt = await fs.promises.readFile(dir + '/' + file, 'utf8');
+        // Strip one trailing newline per side so the panel never shows a
+        // phantom blank last line.
+        oldTxt = oldTxt.replace(/\n$/, '');
+        newTxt = newTxt.replace(/\n$/, '');
+        var lines;
+        if (kind === 'new') lines = newTxt.split('\n').map(function (t, k) { return { t: '+', text: t, b: k + 1 }; });
+        else if (kind === 'deleted') lines = oldTxt.split('\n').map(function (t, k) { return { t: '-', text: t, a: k + 1 }; });
+        else lines = diffLines(oldTxt, newTxt);
+        files.push({ file: file, kind: kind, lines: lines });
+      }
+      return { files: files };
     }
 
     function usageGit() {
@@ -731,6 +1018,8 @@
         '  git log [--oneline]           git diff',
         '  git branch [name] [-d name]   git checkout [-b] <branch>',
         '  git switch [-c] <branch>      git merge <branch>',
+        '  git remote add origin <url>   git push [-u origin <branch>]',
+        '  git fetch                     git pull',
         '  git config user.name "..."'
       ].join('\n');
     }
@@ -795,7 +1084,32 @@
           return { out: '', ok: true };
         }
         case 'pwd':
-          return { out: dir.replace('/project', '~/project'), ok: true };
+          return { out: displayDir, ok: true };
+        // Authoring helper for seeds: move the current branch back n commits
+        // (first parent), so a previously-pushed commit exists only on the
+        // remote — the "colleague pushed while you were away" setup.
+        case 'rewind': {
+          var back = parseInt(args[0] || '1', 10);
+          if (!(back > 0)) return { out: 'usage: rewind <n>', ok: false };
+          var rbr = await currentBranch();
+          if (!rbr) return { out: 'rewind: not on a branch', ok: false };
+          var roid = await gitlib.resolveRef(opts({ ref: rbr }));
+          for (var rw = 0; rw < back; rw++) {
+            var rc = await gitlib.readCommit(opts({ oid: roid }));
+            var rp = rc.commit.parent || [];
+            if (!rp.length) return { out: 'rewind: not enough history to rewind ' + back, ok: false };
+            roid = rp[0];
+          }
+          await gitlib.writeRef(opts({ ref: 'refs/heads/' + rbr, value: roid, force: true }));
+          // keep the tracking ref in step so the learner discovers the newer
+          // remote commits with `git fetch`, not automatically
+          try {
+            await gitlib.resolveRef(opts({ ref: 'refs/remotes/origin/' + rbr }));
+            await setTrackingRef(rbr, roid);
+          } catch (e) { /* no tracking ref yet */ }
+          await gitlib.checkout(opts({ ref: rbr, force: true }));
+          return { out: '', ok: true, silentNote: 'rewound ' + rbr + ' by ' + back };
+        }
         case 'whoami':
           return { out: author.name + ' <' + author.email + '>', ok: true };
         default:
@@ -840,6 +1154,8 @@
       fs = createMemFS();
       base.fs = fs;
       repoReady = false;
+      remoteUrl = null;
+      upstreams = {};
       author = { name: 'Your Name', email: 'you@example.com' };
       await ensureWorkdir();
       if (seed) await seed(api);
@@ -850,6 +1166,8 @@
       reset: reset,
       graphModel: graphModel,
       statusModel: statusModel,
+      diffModel: diffModel,
+      remoteModel: remoteModel,
       isRepo: isRepo,
       currentBranch: currentBranch,
       listFiles: listFiles,
@@ -1165,6 +1483,15 @@
           return function (ctx) { return ctx.files.indexOf(fname) !== -1; };
         }
 
+        case 'remote':
+          return function (ctx) { return !!ctx.remote; };
+
+        // true once the current branch's latest commit is on the remote
+        case 'pushed':
+          return function (ctx) {
+            return !!(ctx.remote && ctx.remote.tracked && ctx.remote.ahead === 0);
+          };
+
         case 'ran': {
           var rTok = peek();
           if (!rTok || (rTok.t !== 'regex' && rTok.t !== 'str' && rTok.t !== 'word')) {
@@ -1184,7 +1511,7 @@
         default:
           throw new Error('unknown condition "' + word + '". Available: repo, clean, staged, ' +
             'commits, commits on <branch>, branch <name>, on <branch>, merged <a> into <b>, ' +
-            'merge commit, file <name> [contains "text"], ran /regex/');
+            'merge commit, file <name> [contains "text"], ran /regex/, remote, pushed');
       }
     }
 
@@ -1348,39 +1675,82 @@
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     var NS = 'http://www.w3.org/2000/svg';
 
+    // Draw at the SVG's real pixel width so nothing overflows sideways; the
+    // graph never needs a horizontal scrollbar.
+    var W = svg.clientWidth || 640;
+
     if (!model.commits.length) {
-      svg.setAttribute('viewBox', '0 0 300 60');
+      svg.setAttribute('viewBox', '0 0 ' + W + ' 60');
       svg.setAttribute('height', '60');
       var t = document.createElementNS(NS, 'text');
-      t.setAttribute('x', '12'); t.setAttribute('y', '34');
+      t.setAttribute('x', String(W / 2)); t.setAttribute('y', '34');
+      t.setAttribute('text-anchor', 'middle');
       t.setAttribute('class', 'gs-empty-text');
       t.textContent = 'No commits yet.';
       svg.appendChild(t);
       return;
     }
 
-    var rowH = 44, laneW = 24, padTop = 26, padLeft = 22;
+    var rowH = 44, laneW = 24, padTop = 26, padLeft = 22, lineH = 17;
     var maxLane = 0;
     model.commits.forEach(function (c) { if (c.lane > maxLane) maxLane = c.lane; });
     var graphW = padLeft + maxLane * laneW + 22;
-    var width = 640;
-    var height = padTop + model.commits.length * rowH;
 
-    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    // Wrap a commit message to a character budget, breaking on spaces and
+    // hard-breaking any single word longer than the line.
+    function wrapWords(text, maxChars) {
+      var words = String(text).split(/\s+/), lines = [], cur = '';
+      words.forEach(function (w) {
+        if (!cur) cur = w;
+        else if ((cur + ' ' + w).length <= maxChars) cur += ' ' + w;
+        else { lines.push(cur); cur = w; }
+      });
+      if (cur) lines.push(cur);
+      var out = [];
+      lines.forEach(function (l) {
+        while (l.length > maxChars) { out.push(l.slice(0, maxChars)); l = l.slice(maxChars); }
+        out.push(l);
+      });
+      return out.length ? out : [''];
+    }
+
+    // First pass: place refs/sha/message per row and measure the wrapped height.
+    var rows = model.commits.map(function (c) {
+      var tx = graphW + 6;
+      var refLayouts = (c.refs || []).map(function (r) {
+        var label = (r.isHead ? 'HEAD → ' : '') + r.name;
+        var w = label.length * 6.6 + 14;
+        var lay = { label: label, x: tx, w: w, isHead: r.isHead, remote: r.remote };
+        tx += w + 6;
+        return lay;
+      });
+      var shaX = tx, msgX = tx + 62;
+      var maxChars = Math.max(8, Math.floor((W - msgX - 12) / 6.8));
+      var lines = wrapWords(c.message, maxChars);
+      return { refLayouts: refLayouts, shaX: shaX, msgX: msgX, lines: lines,
+               h: Math.max(rowH, lines.length * lineH + 20) };
+    });
+
+    // Second pass: stack rows so a wrapped message never overlaps the next.
+    var tops = [], acc = padTop;
+    rows.forEach(function (r) { tops.push(acc); acc += r.h; });
+    var height = acc + 6;
+
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + height);
     svg.setAttribute('height', String(height));
     svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
 
     var index = {};
     model.commits.forEach(function (c, i) { index[c.oid] = i; });
     var x = function (lane) { return padLeft + lane * laneW; };
-    var y = function (i) { return padTop + i * rowH - rowH / 2 + 8; };
+    var cyOf = function (i) { return tops[i] + 16; };
 
     // edges first so nodes sit on top
     model.commits.forEach(function (c, i) {
       (c.parents || []).forEach(function (p, pi) {
         if (!(p in index)) return;
         var j = index[p];
-        var x1 = x(c.lane), y1 = y(i), x2 = x(model.commits[j].lane), y2 = y(j);
+        var x1 = x(c.lane), y1 = cyOf(i), x2 = x(model.commits[j].lane), y2 = cyOf(j);
         var path = document.createElementNS(NS, 'path');
         var d;
         if (x1 === x2) {
@@ -1399,7 +1769,7 @@
     });
 
     model.commits.forEach(function (c, i) {
-      var cx = x(c.lane), cy = y(i);
+      var cx = x(c.lane), cy = cyOf(i), row = rows[i];
       var isMerge = (c.parents || []).length > 1;
 
       var circle = document.createElementNS(NS, 'circle');
@@ -1410,39 +1780,69 @@
       circle.setAttribute('stroke-width', isMerge ? '3' : '2');
       svg.appendChild(circle);
 
-      var tx = graphW + 6;
-
       // ref pills
-      (c.refs || []).forEach(function (r) {
-        var label = (r.isHead ? 'HEAD → ' : '') + r.name;
-        var w = label.length * 6.6 + 14;
+      row.refLayouts.forEach(function (rl) {
         var rect = document.createElementNS(NS, 'rect');
-        rect.setAttribute('x', tx); rect.setAttribute('y', cy - 10);
-        rect.setAttribute('width', w); rect.setAttribute('height', 20);
+        rect.setAttribute('x', rl.x); rect.setAttribute('y', cy - 10);
+        rect.setAttribute('width', rl.w); rect.setAttribute('height', 20);
         rect.setAttribute('rx', 10);
-        rect.setAttribute('fill', r.isHead ? '#447099' : '#D0DBE5');
+        rect.setAttribute('fill', rl.isHead ? '#447099' : (rl.remote ? '#E7E9EC' : '#D0DBE5'));
         svg.appendChild(rect);
         var lt = document.createElementNS(NS, 'text');
-        lt.setAttribute('x', tx + 7); lt.setAttribute('y', cy + 4);
-        lt.setAttribute('class', r.isHead ? 'gs-ref gs-ref-head' : 'gs-ref');
-        lt.textContent = label;
+        lt.setAttribute('x', rl.x + 7); lt.setAttribute('y', cy + 4);
+        lt.setAttribute('class', rl.isHead ? 'gs-ref gs-ref-head' : (rl.remote ? 'gs-ref gs-ref-remote' : 'gs-ref'));
+        lt.textContent = rl.label;
         svg.appendChild(lt);
-        tx += w + 6;
       });
 
       var sha = document.createElementNS(NS, 'text');
-      sha.setAttribute('x', tx); sha.setAttribute('y', cy + 4);
+      sha.setAttribute('x', row.shaX); sha.setAttribute('y', cy + 4);
       sha.setAttribute('class', 'gs-sha');
       sha.textContent = c.short;
       svg.appendChild(sha);
 
       var msg = document.createElementNS(NS, 'text');
-      msg.setAttribute('x', tx + 62); msg.setAttribute('y', cy + 4);
+      msg.setAttribute('y', cy + 4);
       msg.setAttribute('class', 'gs-msg');
-      var m = c.message.length > 46 ? c.message.slice(0, 45) + '…' : c.message;
-      msg.textContent = m;
+      row.lines.forEach(function (line, li) {
+        var ts = document.createElementNS(NS, 'tspan');
+        ts.setAttribute('x', row.msgX);
+        ts.setAttribute('dy', li === 0 ? '0' : String(lineH));
+        ts.textContent = line;
+        msg.appendChild(ts);
+      });
       svg.appendChild(msg);
     });
+  }
+
+  /* ------------------------------ diff panel ------------------------- */
+
+  function renderDiff(node, model) {
+    if (!model) {
+      node.innerHTML = '<div class="gs-diff-empty">Nothing is tracked yet — run <code>git init</code> to start.</div>';
+      return;
+    }
+    if (!model.files.length) {
+      node.innerHTML = '<div class="gs-diff-empty">Working directory clean — no changes since the last commit.</div>';
+      return;
+    }
+    node.innerHTML = model.files.map(function (f) {
+      var rows = f.lines.map(function (l) {
+        var cls = l.t === '+' ? ' gs-diff-add' : (l.t === '-' ? ' gs-diff-del' : '');
+        return '<div class="gs-diff-line' + cls + '">' +
+          '<span class="gs-diff-num">' + (l.a || '') + '</span>' +
+          '<span class="gs-diff-num">' + (l.b || '') + '</span>' +
+          '<span class="gs-diff-sign">' + (l.t === ' ' ? '' : l.t) + '</span>' +
+          '<span class="gs-diff-text">' + esc(l.text) + '</span>' +
+        '</div>';
+      }).join('');
+      return '<div class="gs-diff-file">' +
+        '<div class="gs-diff-filehead">' +
+          '<span class="gs-diff-name">' + esc(f.file) + '</span>' +
+          '<span class="gs-diff-kind gs-diff-kind-' + f.kind + '">' + f.kind + '</span>' +
+        '</div>' + rows +
+      '</div>';
+    }).join('');
   }
 
   /* -------------------------- staging diagram ------------------------ */
@@ -1475,9 +1875,9 @@
 
     node.innerHTML =
       col('Working directory', 'what you edit', needAdd, 'work') +
-      '<div class="gs-arrow"><span>git add</span>→</div>' +
+      '<div class="gs-arrow"><span>git add</span><i class="gs-arrow-g">→</i></div>' +
       col('Staging area', 'what goes in next commit', staged, 'stage') +
-      '<div class="gs-arrow"><span>git commit</span>→</div>' +
+      '<div class="gs-arrow"><span>git commit</span><i class="gs-arrow-g">→</i></div>' +
       col('Repository', 'permanent history', repoItems, 'repo');
   }
 
@@ -1503,7 +1903,10 @@
       return null;
     }
 
-    var sb = root.GitSandboxCore.createSandbox({ git: root.git });
+    var sb = root.GitSandboxCore.createSandbox({
+      git: root.git,
+      displayDir: (config.prompt || '~/project').replace(/\s*\$\s*$/, '')
+    });
     var history = [];
     var histIdx = -1;
     var busy = false;
@@ -1530,8 +1933,15 @@
         '<div class="gs-viz">' +
           '<div class="gs-viz-h">Where your work lives</div>' +
           '<div class="gs-stages"></div>' +
+          '<div class="gs-viz-h">Changes since last commit</div>' +
+          '<div class="gs-diff"></div>' +
           '<div class="gs-viz-h">Commit history</div>' +
           '<div class="gs-graph-scroll"><svg class="gs-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
+          '<div class="gs-remote" hidden>' +
+            '<div class="gs-viz-h">Remote — origin</div>' +
+            '<div class="gs-graph-scroll"><svg class="gs-remote-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
+            '<div class="gs-remote-sync"></div>' +
+          '</div>' +
         '</div>' +
       '</div>' +
       '<div class="gs-tasks"></div>';
@@ -1541,9 +1951,38 @@
     var input = host.querySelector('.gs-input');
     var hintsNode = host.querySelector('.gs-hints');
     var stagesNode = host.querySelector('.gs-stages');
+    var diffNode = host.querySelector('.gs-diff');
     var svg = host.querySelector('.gs-graph');
+    var remoteWrap = host.querySelector('.gs-remote');
+    var remoteSvg = host.querySelector('.gs-remote-graph');
+    var remoteSync = host.querySelector('.gs-remote-sync');
     var tasksNode = host.querySelector('.gs-tasks');
     var resetBtn = host.querySelector('.gs-reset');
+
+    // The graph is drawn at the SVG's current pixel width, so a later resize
+    // would scale it like an image (tiny text on narrow screens). Redraw the
+    // last model whenever the width actually changes.
+    var lastGraph = null;
+    var lastGraphW = 0;
+    var lastRemoteGraph = null;
+    var lastRemoteGraphW = 0;
+    function redrawGraph() {
+      var w = svg.clientWidth;
+      if (lastGraph && w && w !== lastGraphW) {
+        lastGraphW = w;
+        renderGraph(svg, lastGraph);
+      }
+      var rw = remoteSvg.clientWidth;
+      if (lastRemoteGraph && rw && rw !== lastRemoteGraphW) {
+        lastRemoteGraphW = rw;
+        renderGraph(remoteSvg, lastRemoteGraph);
+      }
+    }
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(redrawGraph).observe(svg.parentNode);
+    } else {
+      root.addEventListener('resize', redrawGraph);
+    }
 
     function write(html, cls) {
       var line = el('div', 'gs-line' + (cls ? ' ' + cls : ''), html);
@@ -1602,7 +2041,23 @@
         status.untracked = files.slice();
       }
       renderStages(stagesNode, status, graph, files);
+      renderDiff(diffNode, await sb.diffModel());
       renderGraph(svg, graph);
+      lastGraph = graph;
+      lastGraphW = svg.clientWidth;
+
+      var remote = await sb.remoteModel();
+      if (remote) {
+        remoteWrap.hidden = false;
+        renderGraph(remoteSvg, remote.graph);
+        lastRemoteGraph = remote.graph;
+        lastRemoteGraphW = remoteSvg.clientWidth;
+        remoteSync.innerHTML = remoteSyncText(remote);
+      } else {
+        remoteWrap.hidden = true;
+        lastRemoteGraph = null;
+        remoteSync.innerHTML = '';
+      }
 
       // `file x contains "y"` needs file contents; read them up front so the
       // compiled predicates can stay synchronous.
@@ -1618,7 +2073,7 @@
 
       var ctx = {
         sb: sb, graph: graph, status: status, files: files,
-        history: history, isRepo: isRepo,
+        history: history, isRepo: isRepo, remote: remote,
         _fileText: function (name) { return contents[name] || ''; }
       };
       for (var i = 0; i < tasks.length; i++) {
@@ -1652,12 +2107,25 @@
       input.focus();
     }
 
+    // one-line summary under the remote graph: how the learner's current
+    // branch compares to its counterpart on the remote
+    function remoteSyncText(r) {
+      if (!r.branch || !r.tracked) return '';
+      var b = esc(r.branch);
+      var n = function (k) { return k + ' commit' + (k === 1 ? '' : 's'); };
+      if (!r.ahead && !r.behind) return '✓ in sync with your <code>' + b + '</code>';
+      if (r.ahead && r.behind) return '<code>origin/' + b + '</code> and your <code>' + b + '</code> have diverged — <code>git pull</code>, then <code>git push</code>';
+      if (r.behind) return '<code>origin/' + b + '</code> is ' + n(r.behind) + ' ahead of your <code>' + b + '</code> — <code>git pull</code> to update';
+      return 'your <code>' + b + '</code> is ' + n(r.ahead) + ' ahead — <code>git push</code> to publish';
+    }
+
     function helpText() {
       return [
         '{w}This sandbox runs real git{/} (isomorphic-git) on a repo that lives only in this page.',
         '',
         '{y}git{/}    init, status, add, commit -m, log [--oneline], diff,',
-        '       branch [-d], checkout [-b], switch [-c], merge, config',
+        '       branch [-d], checkout [-b], switch [-c], merge, config,',
+        '       remote add origin, push [-u], pull, fetch',
         '{y}shell{/}  ls, cat, echo "text" > file, echo "text" >> file, touch, rm, mkdir, pwd',
         '{y}other{/}  help, clear, reset'
       ].join('\n');

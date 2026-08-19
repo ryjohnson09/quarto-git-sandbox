@@ -274,6 +274,15 @@
 
     var fs = createMemFS();
     var dir = options.dir || '/project';
+    // Path shown to the user in messages and pwd; the real in-memory fs
+    // stays rooted at `dir` regardless of what the prompt displays.
+    var displayDir = options.displayDir || '~' + dir;
+    // Mock remote: a bare repository elsewhere in the same in-memory fs,
+    // created by `git remote add origin <url>`. Push/pull/fetch move objects
+    // and refs between it and the local repo — nothing leaves the page.
+    var remoteGitdir = '/origin';
+    var remoteUrl = null;
+    var upstreams = {};   // branch name -> true once `push -u` recorded it
     var author = { name: 'Your Name', email: 'you@example.com' };
     var defaultBranch = options.defaultBranch || 'main';
     var repoReady = false;
@@ -321,27 +330,70 @@
       return out.sort();
     }
 
+    /* ------------------------------ remote -------------------------- */
+
+    // options builder for commands that read the remote's bare repo
+    function ropts(extra) {
+      var o = { fs: fs, gitdir: remoteGitdir };
+      for (var k in extra) o[k] = extra[k];
+      return o;
+    }
+
+    async function remoteBranchOid(name) {
+      try { return (await fs.promises.readFile(remoteGitdir + '/refs/heads/' + name, 'utf8')).trim(); }
+      catch (e) { return null; }
+    }
+
+    async function listRemoteBranchNames() {
+      try { return (await fs.promises.readdir(remoteGitdir + '/refs/heads')).sort(); }
+      catch (e) { return []; }
+    }
+
+    // Copy every git object file present under `from` but missing under `to`.
+    // Both repos live in the same in-memory fs, so a push/fetch "transfer"
+    // is a plain file copy.
+    async function copyObjects(fromGitdir, toGitdir) {
+      var prefix = fromGitdir + '/objects/';
+      var paths = [];
+      fs._store.forEach(function (v, k) {
+        if (v.type === 'file' && k.indexOf(prefix) === 0) paths.push(k);
+      });
+      for (var i = 0; i < paths.length; i++) {
+        var dest = toGitdir + paths[i].slice(fromGitdir.length);
+        try { await fs.promises.stat(dest); continue; } catch (e) { /* missing: copy */ }
+        await fs.promises.mkdir(dest.slice(0, dest.lastIndexOf('/')), { recursive: true });
+        await fs.promises.writeFile(dest, await fs.promises.readFile(paths[i]));
+      }
+    }
+
+    // set of commit oids reachable from `oid`, read via the given options builder
+    async function reachableFrom(oid, optsFn) {
+      var seen = {};
+      var queue = [oid];
+      while (queue.length) {
+        var o = queue.shift();
+        if (!o || seen[o]) continue;
+        var c;
+        try { c = await gitlib.readCommit(optsFn({ oid: o })); } catch (e) { continue; }
+        seen[o] = true;
+        (c.commit.parent || []).forEach(function (p) { queue.push(p); });
+      }
+      return seen;
+    }
+
+    async function setTrackingRef(branch, oid) {
+      await gitlib.writeRef(opts({ ref: 'refs/remotes/origin/' + branch, value: oid, force: true }));
+    }
+
     /* ------------------------- graph model ------------------------- */
 
-    async function graphModel() {
-      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false };
-
-      var branches = await gitlib.listBranches(opts());
-      var head = await currentBranch();
-      var refs = {};
-      var seeds = [];
-
-      for (var i = 0; i < branches.length; i++) {
-        try {
-          var oid = await gitlib.resolveRef(opts({ ref: branches[i] }));
-          refs[branches[i]] = oid;
-          seeds.push(oid);
-        } catch (e) { /* unborn branch */ }
-      }
-      // include HEAD in case it is detached
-      var headOid = null;
-      try { headOid = await gitlib.resolveRef(opts({ ref: 'HEAD' })); if (headOid) seeds.push(headOid); }
-      catch (e) { /* no commits yet */ }
+    // Shared commit-graph builder. refEntries: [{ name, oid, isHead, remote }].
+    // Walks history from the given refs (plus extraSeeds), reading commits
+    // with optsFn — opts for the local repo, ropts for the remote.
+    async function buildGraph(refEntries, extraSeeds, optsFn) {
+      var seeds = refEntries.map(function (e) { return e.oid; })
+        .concat(extraSeeds || [])
+        .filter(Boolean);
 
       var seen = new Map();
       var queue = seeds.slice();
@@ -349,7 +401,7 @@
         var oid2 = queue.shift();
         if (!oid2 || seen.has(oid2)) continue;
         var c;
-        try { c = await gitlib.readCommit(opts({ oid: oid2 })); }
+        try { c = await gitlib.readCommit(optsFn({ oid: oid2 })); }
         catch (e) { continue; }
         seen.set(oid2, {
           oid: oid2,
@@ -392,9 +444,9 @@
         commits = all.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
       }
 
-      Object.keys(refs).forEach(function (name) {
-        var node = seen.get(refs[name]);
-        if (node) node.refs.push({ name: name, isHead: name === head });
+      refEntries.forEach(function (e) {
+        var node = seen.get(e.oid);
+        if (node) node.refs.push({ name: e.name, isHead: !!e.isHead, remote: !!e.remote });
       });
 
       // lane assignment: walk newest -> oldest keeping a set of open lanes
@@ -420,12 +472,83 @@
         }
       });
 
+      return commits;
+    }
+
+    async function graphModel() {
+      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false };
+
+      var branches = await gitlib.listBranches(opts());
+      var head = await currentBranch();
+      var refs = {};
+      var refEntries = [];
+
+      for (var i = 0; i < branches.length; i++) {
+        try {
+          var oid = await gitlib.resolveRef(opts({ ref: branches[i] }));
+          refs[branches[i]] = oid;
+          refEntries.push({ name: branches[i], oid: oid, isHead: branches[i] === head });
+        } catch (e) { /* unborn branch */ }
+      }
+
+      // remote-tracking refs (origin/*) appear as grey pills, like real git log
+      if (remoteUrl) {
+        var tracked = [];
+        try { tracked = await fs.promises.readdir(dir + '/.git/refs/remotes/origin'); } catch (e) {}
+        for (var t = 0; t < tracked.length; t++) {
+          try {
+            var toid = await gitlib.resolveRef(opts({ ref: 'refs/remotes/origin/' + tracked[t] }));
+            refEntries.push({ name: 'origin/' + tracked[t], oid: toid, remote: true });
+          } catch (e) { /* dangling tracking ref */ }
+        }
+      }
+
+      // include HEAD in case it is detached
+      var headOid = null;
+      try { headOid = await gitlib.resolveRef(opts({ ref: 'HEAD' })); }
+      catch (e) { /* no commits yet */ }
+
+      var commits = await buildGraph(refEntries, headOid ? [headOid] : [], opts);
+
       return {
         commits: commits,
         branches: branches.map(function (b) { return { name: b, oid: refs[b] || null, isHead: b === head }; }),
         head: head,
         headOid: headOid,
         detached: head === null && headOid !== null
+      };
+    }
+
+    // What the mock remote looks like "on GitHub": its own commit graph plus
+    // how the learner's current branch compares to it. Null until
+    // `git remote add origin <url>` has run.
+    async function remoteModel() {
+      if (!remoteUrl) return null;
+      var names = await listRemoteBranchNames();
+      var refEntries = [];
+      for (var i = 0; i < names.length; i++) {
+        refEntries.push({ name: 'origin/' + names[i], oid: await remoteBranchOid(names[i]), remote: true });
+      }
+      var commits = await buildGraph(refEntries, [], ropts);
+
+      var branch = await currentBranch();
+      var tracked = false, ahead = 0, behind = 0;
+      if (branch) {
+        var remoteOid = await remoteBranchOid(branch);
+        if (remoteOid) {
+          tracked = true;
+          var localOid = null;
+          try { localOid = await gitlib.resolveRef(opts({ ref: branch })); } catch (e) {}
+          var localSet = localOid ? await reachableFrom(localOid, opts) : {};
+          var remoteSet = await reachableFrom(remoteOid, ropts);
+          Object.keys(localSet).forEach(function (o) { if (!remoteSet[o]) ahead++; });
+          Object.keys(remoteSet).forEach(function (o) { if (!localSet[o]) behind++; });
+        }
+      }
+      return {
+        url: remoteUrl,
+        graph: { commits: commits, branches: names, head: null, detached: false },
+        branch: branch, tracked: tracked, ahead: ahead, behind: behind
       };
     }
 
@@ -478,10 +601,10 @@
 
       switch (sub) {
         case 'init': {
-          if (await isRepo()) return { out: 'Reinitialized existing Git repository in ' + dir + '/.git/', ok: true };
+          if (await isRepo()) return { out: 'Reinitialized existing Git repository in ' + displayDir + '/.git/', ok: true };
           await gitlib.init(opts({ defaultBranch: defaultBranch }));
           repoReady = true;
-          return { out: 'Initialized empty Git repository in ' + dir + '/.git/', ok: true };
+          return { out: 'Initialized empty Git repository in ' + displayDir + '/.git/', ok: true };
         }
 
         case 'config': {
@@ -582,6 +705,13 @@
           try { commits = await gitlib.log(opts({ depth: 50 })); }
           catch (e) { return { out: "fatal: your current branch does not have any commits yet", ok: false }; }
           if (!commits.length) return { out: 'fatal: your current branch does not have any commits yet', ok: false };
+          // isomorphic-git's log revisits shared history once per merge parent
+          var logSeen = {};
+          commits = commits.filter(function (c) {
+            if (logSeen[c.oid]) return false;
+            logSeen[c.oid] = true;
+            return true;
+          });
           var g = await graphModel();
           var refsByOid = {};
           g.commits.forEach(function (c) { if (c.refs.length) refsByOid[c.oid] = c.refs; });
@@ -610,7 +740,7 @@
           var cur = await currentBranch();
           if (del) {
             if (!names.length) return { out: 'fatal: branch name required', ok: false };
-            if (names[0] === cur) return { out: "error: cannot delete branch '" + names[0] + "' checked out at '" + dir + "'", ok: false };
+            if (names[0] === cur) return { out: "error: cannot delete branch '" + names[0] + "' checked out at '" + displayDir + "'", ok: false };
             if (all.indexOf(names[0]) === -1) return { out: "error: branch '" + names[0] + "' not found.", ok: false };
             await gitlib.deleteBranch(opts({ ref: names[0] }));
             return { out: "Deleted branch " + names[0], ok: true };
@@ -676,6 +806,121 @@
           return { out: "Merge made by the 'recursive' strategy.", ok: true };
         }
 
+        case 'remote': {
+          if (rest[0] === 'add') {
+            if (rest[1] !== 'origin' || !rest[2]) return { out: 'usage: git remote add origin <url>', ok: false };
+            if (remoteUrl) return { out: 'error: remote origin already exists.', ok: false };
+            await gitlib.init({ fs: fs, gitdir: remoteGitdir, bare: true, defaultBranch: defaultBranch });
+            remoteUrl = rest[2];
+            return { out: '', ok: true };
+          }
+          if (!rest.length) return { out: remoteUrl ? 'origin' : '', ok: true };
+          if (rest[0] === '-v') {
+            if (!remoteUrl) return { out: '', ok: true };
+            return { out: 'origin\t' + remoteUrl + ' (fetch)\norigin\t' + remoteUrl + ' (push)', ok: true };
+          }
+          return { out: 'usage: git remote [-v] | git remote add origin <url>', ok: false };
+        }
+
+        case 'push': {
+          if (!remoteUrl) return { out: 'fatal: No configured push destination.\nAdd a remote first: git remote add origin <url>', ok: false };
+          var setUp = rest.indexOf('-u') !== -1 || rest.indexOf('--set-upstream') !== -1;
+          var words = rest.filter(function (a) { return a.charAt(0) !== '-'; });
+          if (words[0] && words[0] !== 'origin') return { out: "fatal: '" + words[0] + "' does not appear to be a git repository", ok: false };
+          var pbr = words[1] || (await currentBranch());
+          if (!pbr) return { out: 'fatal: you are not currently on a branch.', ok: false };
+          var locals = await gitlib.listBranches(opts());
+          if (locals.indexOf(pbr) === -1) return { out: 'error: src refspec ' + pbr + ' does not match any', ok: false };
+          if (!words[1] && !upstreams[pbr]) {
+            return {
+              out: 'fatal: The current branch ' + pbr + ' has no upstream branch.\n' +
+                   'To push the current branch and set the remote as upstream, use\n\n' +
+                   '    git push -u origin ' + pbr,
+              ok: false
+            };
+          }
+          var localOid = await gitlib.resolveRef(opts({ ref: pbr }));
+          var remoteOid = await remoteBranchOid(pbr);
+          if (setUp) upstreams[pbr] = true;
+          if (remoteOid === localOid) return { out: 'Everything up-to-date', ok: true };
+          if (remoteOid) {
+            // only fast-forward pushes are allowed, like a real remote
+            var pushedSet = await reachableFrom(localOid, opts);
+            if (!pushedSet[remoteOid]) {
+              return {
+                out: 'To ' + remoteUrl + '\n' +
+                     ' {r}! [rejected]{/}        ' + pbr + ' -> ' + pbr + ' (fetch first)\n' +
+                     'hint: Updates were rejected because the remote contains work that you do\n' +
+                     'hint: not have locally. Pull the remote changes ({y}git pull{/}) before pushing again.',
+                ok: false
+              };
+            }
+          }
+          await copyObjects(dir + '/.git', remoteGitdir);
+          await fs.promises.mkdir(remoteGitdir + '/refs/heads', { recursive: true });
+          await fs.promises.writeFile(remoteGitdir + '/refs/heads/' + pbr, localOid + '\n');
+          await setTrackingRef(pbr, localOid);
+          var pushOut = ['To ' + remoteUrl];
+          pushOut.push(remoteOid
+            ? '   ' + remoteOid.slice(0, 7) + '..' + localOid.slice(0, 7) + '  ' + pbr + ' -> ' + pbr
+            : ' * [new branch]      ' + pbr + ' -> ' + pbr);
+          if (setUp) pushOut.push("branch '" + pbr + "' set up to track 'origin/" + pbr + "'.");
+          return { out: pushOut.join('\n'), ok: true };
+        }
+
+        case 'fetch': {
+          if (!remoteUrl) return { out: "fatal: 'origin' does not appear to be a git repository", ok: false };
+          var rnames = await listRemoteBranchNames();
+          await copyObjects(remoteGitdir, dir + '/.git');
+          var updated = [];
+          for (var fi = 0; fi < rnames.length; fi++) {
+            var rOid = await remoteBranchOid(rnames[fi]);
+            var cur = null;
+            try { cur = await gitlib.resolveRef(opts({ ref: 'refs/remotes/origin/' + rnames[fi] })); } catch (e) {}
+            if (cur === rOid) continue;
+            await setTrackingRef(rnames[fi], rOid);
+            updated.push(cur
+              ? '   ' + cur.slice(0, 7) + '..' + rOid.slice(0, 7) + '  ' + rnames[fi] + '       -> origin/' + rnames[fi]
+              : ' * [new branch]      ' + rnames[fi] + '       -> origin/' + rnames[fi]);
+          }
+          if (!updated.length) return { out: '', ok: true };
+          return { out: ['From ' + remoteUrl].concat(updated).join('\n'), ok: true };
+        }
+
+        case 'pull': {
+          if (!remoteUrl) return { out: "fatal: 'origin' does not appear to be a git repository", ok: false };
+          var lbr = await currentBranch();
+          if (!lbr) return { out: 'fatal: you are not currently on a branch.', ok: false };
+          var fetched = await gitCommand(['fetch']);
+          var theirOid = await remoteBranchOid(lbr);
+          if (!theirOid) return { out: "fatal: origin has no branch named '" + lbr + "' to pull from.", ok: false };
+          var oursOid = await gitlib.resolveRef(opts({ ref: lbr }));
+          var prefix2 = fetched.out ? fetched.out + '\n' : '';
+          if (theirOid === oursOid) return { out: prefix2 + 'Already up to date.', ok: true };
+          var pres;
+          try {
+            pres = await gitlib.merge(opts({
+              ours: lbr, theirs: 'refs/remotes/origin/' + lbr,
+              author: { name: author.name, email: author.email },
+              message: "Merge branch '" + lbr + "' of " + remoteUrl
+            }));
+          } catch (e) {
+            if (e.code === 'MergeNotSupportedError' || e.code === 'MergeConflictError') {
+              return {
+                out: prefix2 + 'CONFLICT: the remote changed the same lines you did.\n' +
+                     'Automatic merge failed. In this sandbox, conflicts are not resolvable yet —\n' +
+                     'try `reset` and take the guided path instead.',
+                ok: false
+              };
+            }
+            return { out: prefix2 + 'fatal: ' + e.message, ok: false };
+          }
+          await gitlib.checkout(opts({ ref: lbr, force: true }));
+          if (pres.alreadyMerged) return { out: prefix2 + 'Already up to date.', ok: true };
+          if (pres.fastForward) return { out: prefix2 + 'Updating ' + oursOid.slice(0, 7) + '..' + theirOid.slice(0, 7) + '\nFast-forward', ok: true };
+          return { out: prefix2 + "Merge made by the 'recursive' strategy.", ok: true };
+        }
+
         case 'diff': {
           var st3 = await statusModel();
           if (!st3.modified.length && !st3.untracked.length) return { out: '', ok: true };
@@ -700,17 +945,59 @@
       }
     }
 
-    function simpleDiff(oldTxt, newTxt) {
+    // Line-by-line diff as data: [{ t: ' '|'+'|'-', text, a, b }] where a/b
+    // are 1-based line numbers in the old/new file (absent on the other side).
+    function diffLines(oldTxt, newTxt) {
       var a = oldTxt.split('\n'), b = newTxt.split('\n');
       var out = [];
       var i = 0, j = 0;
       while (i < a.length || j < b.length) {
-        if (i < a.length && j < b.length && a[i] === b[j]) { out.push(' ' + a[i]); i++; j++; }
-        else if (j < b.length && (i >= a.length || a.indexOf(b[j], i) === -1)) { out.push('{g}+' + b[j] + '{/}'); j++; }
-        else if (i < a.length) { out.push('{r}-' + a[i] + '{/}'); i++; }
+        if (i < a.length && j < b.length && a[i] === b[j]) { out.push({ t: ' ', text: a[i], a: i + 1, b: j + 1 }); i++; j++; }
+        else if (j < b.length && (i >= a.length || a.indexOf(b[j], i) === -1)) { out.push({ t: '+', text: b[j], b: j + 1 }); j++; }
+        else if (i < a.length) { out.push({ t: '-', text: a[i], a: i + 1 }); i++; }
         else break;
       }
-      return out.join('\n');
+      return out;
+    }
+
+    function simpleDiff(oldTxt, newTxt) {
+      return diffLines(oldTxt, newTxt).map(function (l) {
+        if (l.t === '+') return '{g}+' + l.text + '{/}';
+        if (l.t === '-') return '{r}-' + l.text + '{/}';
+        return ' ' + l.text;
+      }).join('\n');
+    }
+
+    // Working directory vs the last commit, structured for rendering:
+    // { files: [{ file, kind: 'new'|'modified'|'deleted', lines: [...] }] }
+    // or null when there is no repository yet.
+    async function diffModel() {
+      if (!(await isRepo())) return null;
+      var headOid = null;
+      try { headOid = await gitlib.resolveRef(opts({ ref: 'HEAD' })); } catch (e) {}
+      var matrix = await gitlib.statusMatrix(opts());
+      var files = [];
+      for (var r = 0; r < matrix.length; r++) {
+        var file = matrix[r][0], head = matrix[r][1], workdir = matrix[r][2];
+        if (head === workdir) continue;                       // unchanged or absent
+        var kind = head === 0 ? 'new' : (workdir === 0 ? 'deleted' : 'modified');
+        var oldTxt = '', newTxt = '';
+        if (head === 1 && headOid) {
+          var blob = await gitlib.readBlob(opts({ oid: headOid, filepath: file }));
+          oldTxt = new TextDecoder().decode(blob.blob);
+        }
+        if (workdir !== 0) newTxt = await fs.promises.readFile(dir + '/' + file, 'utf8');
+        // Strip one trailing newline per side so the panel never shows a
+        // phantom blank last line.
+        oldTxt = oldTxt.replace(/\n$/, '');
+        newTxt = newTxt.replace(/\n$/, '');
+        var lines;
+        if (kind === 'new') lines = newTxt.split('\n').map(function (t, k) { return { t: '+', text: t, b: k + 1 }; });
+        else if (kind === 'deleted') lines = oldTxt.split('\n').map(function (t, k) { return { t: '-', text: t, a: k + 1 }; });
+        else lines = diffLines(oldTxt, newTxt);
+        files.push({ file: file, kind: kind, lines: lines });
+      }
+      return { files: files };
     }
 
     function usageGit() {
@@ -721,6 +1008,8 @@
         '  git log [--oneline]           git diff',
         '  git branch [name] [-d name]   git checkout [-b] <branch>',
         '  git switch [-c] <branch>      git merge <branch>',
+        '  git remote add origin <url>   git push [-u origin <branch>]',
+        '  git fetch                     git pull',
         '  git config user.name "..."'
       ].join('\n');
     }
@@ -785,7 +1074,32 @@
           return { out: '', ok: true };
         }
         case 'pwd':
-          return { out: dir.replace('/project', '~/project'), ok: true };
+          return { out: displayDir, ok: true };
+        // Authoring helper for seeds: move the current branch back n commits
+        // (first parent), so a previously-pushed commit exists only on the
+        // remote — the "colleague pushed while you were away" setup.
+        case 'rewind': {
+          var back = parseInt(args[0] || '1', 10);
+          if (!(back > 0)) return { out: 'usage: rewind <n>', ok: false };
+          var rbr = await currentBranch();
+          if (!rbr) return { out: 'rewind: not on a branch', ok: false };
+          var roid = await gitlib.resolveRef(opts({ ref: rbr }));
+          for (var rw = 0; rw < back; rw++) {
+            var rc = await gitlib.readCommit(opts({ oid: roid }));
+            var rp = rc.commit.parent || [];
+            if (!rp.length) return { out: 'rewind: not enough history to rewind ' + back, ok: false };
+            roid = rp[0];
+          }
+          await gitlib.writeRef(opts({ ref: 'refs/heads/' + rbr, value: roid, force: true }));
+          // keep the tracking ref in step so the learner discovers the newer
+          // remote commits with `git fetch`, not automatically
+          try {
+            await gitlib.resolveRef(opts({ ref: 'refs/remotes/origin/' + rbr }));
+            await setTrackingRef(rbr, roid);
+          } catch (e) { /* no tracking ref yet */ }
+          await gitlib.checkout(opts({ ref: rbr, force: true }));
+          return { out: '', ok: true, silentNote: 'rewound ' + rbr + ' by ' + back };
+        }
         case 'whoami':
           return { out: author.name + ' <' + author.email + '>', ok: true };
         default:
@@ -830,6 +1144,8 @@
       fs = createMemFS();
       base.fs = fs;
       repoReady = false;
+      remoteUrl = null;
+      upstreams = {};
       author = { name: 'Your Name', email: 'you@example.com' };
       await ensureWorkdir();
       if (seed) await seed(api);
@@ -840,6 +1156,8 @@
       reset: reset,
       graphModel: graphModel,
       statusModel: statusModel,
+      diffModel: diffModel,
+      remoteModel: remoteModel,
       isRepo: isRepo,
       currentBranch: currentBranch,
       listFiles: listFiles,

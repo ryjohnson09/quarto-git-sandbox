@@ -101,39 +101,82 @@
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     var NS = 'http://www.w3.org/2000/svg';
 
+    // Draw at the SVG's real pixel width so nothing overflows sideways; the
+    // graph never needs a horizontal scrollbar.
+    var W = svg.clientWidth || 640;
+
     if (!model.commits.length) {
-      svg.setAttribute('viewBox', '0 0 300 60');
+      svg.setAttribute('viewBox', '0 0 ' + W + ' 60');
       svg.setAttribute('height', '60');
       var t = document.createElementNS(NS, 'text');
-      t.setAttribute('x', '12'); t.setAttribute('y', '34');
+      t.setAttribute('x', String(W / 2)); t.setAttribute('y', '34');
+      t.setAttribute('text-anchor', 'middle');
       t.setAttribute('class', 'gs-empty-text');
       t.textContent = 'No commits yet.';
       svg.appendChild(t);
       return;
     }
 
-    var rowH = 44, laneW = 24, padTop = 26, padLeft = 22;
+    var rowH = 44, laneW = 24, padTop = 26, padLeft = 22, lineH = 17;
     var maxLane = 0;
     model.commits.forEach(function (c) { if (c.lane > maxLane) maxLane = c.lane; });
     var graphW = padLeft + maxLane * laneW + 22;
-    var width = 640;
-    var height = padTop + model.commits.length * rowH;
 
-    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    // Wrap a commit message to a character budget, breaking on spaces and
+    // hard-breaking any single word longer than the line.
+    function wrapWords(text, maxChars) {
+      var words = String(text).split(/\s+/), lines = [], cur = '';
+      words.forEach(function (w) {
+        if (!cur) cur = w;
+        else if ((cur + ' ' + w).length <= maxChars) cur += ' ' + w;
+        else { lines.push(cur); cur = w; }
+      });
+      if (cur) lines.push(cur);
+      var out = [];
+      lines.forEach(function (l) {
+        while (l.length > maxChars) { out.push(l.slice(0, maxChars)); l = l.slice(maxChars); }
+        out.push(l);
+      });
+      return out.length ? out : [''];
+    }
+
+    // First pass: place refs/sha/message per row and measure the wrapped height.
+    var rows = model.commits.map(function (c) {
+      var tx = graphW + 6;
+      var refLayouts = (c.refs || []).map(function (r) {
+        var label = (r.isHead ? 'HEAD → ' : '') + r.name;
+        var w = label.length * 6.6 + 14;
+        var lay = { label: label, x: tx, w: w, isHead: r.isHead, remote: r.remote };
+        tx += w + 6;
+        return lay;
+      });
+      var shaX = tx, msgX = tx + 62;
+      var maxChars = Math.max(8, Math.floor((W - msgX - 12) / 6.8));
+      var lines = wrapWords(c.message, maxChars);
+      return { refLayouts: refLayouts, shaX: shaX, msgX: msgX, lines: lines,
+               h: Math.max(rowH, lines.length * lineH + 20) };
+    });
+
+    // Second pass: stack rows so a wrapped message never overlaps the next.
+    var tops = [], acc = padTop;
+    rows.forEach(function (r) { tops.push(acc); acc += r.h; });
+    var height = acc + 6;
+
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + height);
     svg.setAttribute('height', String(height));
     svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
 
     var index = {};
     model.commits.forEach(function (c, i) { index[c.oid] = i; });
     var x = function (lane) { return padLeft + lane * laneW; };
-    var y = function (i) { return padTop + i * rowH - rowH / 2 + 8; };
+    var cyOf = function (i) { return tops[i] + 16; };
 
     // edges first so nodes sit on top
     model.commits.forEach(function (c, i) {
       (c.parents || []).forEach(function (p, pi) {
         if (!(p in index)) return;
         var j = index[p];
-        var x1 = x(c.lane), y1 = y(i), x2 = x(model.commits[j].lane), y2 = y(j);
+        var x1 = x(c.lane), y1 = cyOf(i), x2 = x(model.commits[j].lane), y2 = cyOf(j);
         var path = document.createElementNS(NS, 'path');
         var d;
         if (x1 === x2) {
@@ -152,7 +195,7 @@
     });
 
     model.commits.forEach(function (c, i) {
-      var cx = x(c.lane), cy = y(i);
+      var cx = x(c.lane), cy = cyOf(i), row = rows[i];
       var isMerge = (c.parents || []).length > 1;
 
       var circle = document.createElementNS(NS, 'circle');
@@ -163,39 +206,69 @@
       circle.setAttribute('stroke-width', isMerge ? '3' : '2');
       svg.appendChild(circle);
 
-      var tx = graphW + 6;
-
       // ref pills
-      (c.refs || []).forEach(function (r) {
-        var label = (r.isHead ? 'HEAD → ' : '') + r.name;
-        var w = label.length * 6.6 + 14;
+      row.refLayouts.forEach(function (rl) {
         var rect = document.createElementNS(NS, 'rect');
-        rect.setAttribute('x', tx); rect.setAttribute('y', cy - 10);
-        rect.setAttribute('width', w); rect.setAttribute('height', 20);
+        rect.setAttribute('x', rl.x); rect.setAttribute('y', cy - 10);
+        rect.setAttribute('width', rl.w); rect.setAttribute('height', 20);
         rect.setAttribute('rx', 10);
-        rect.setAttribute('fill', r.isHead ? '#447099' : '#D0DBE5');
+        rect.setAttribute('fill', rl.isHead ? '#447099' : (rl.remote ? '#E7E9EC' : '#D0DBE5'));
         svg.appendChild(rect);
         var lt = document.createElementNS(NS, 'text');
-        lt.setAttribute('x', tx + 7); lt.setAttribute('y', cy + 4);
-        lt.setAttribute('class', r.isHead ? 'gs-ref gs-ref-head' : 'gs-ref');
-        lt.textContent = label;
+        lt.setAttribute('x', rl.x + 7); lt.setAttribute('y', cy + 4);
+        lt.setAttribute('class', rl.isHead ? 'gs-ref gs-ref-head' : (rl.remote ? 'gs-ref gs-ref-remote' : 'gs-ref'));
+        lt.textContent = rl.label;
         svg.appendChild(lt);
-        tx += w + 6;
       });
 
       var sha = document.createElementNS(NS, 'text');
-      sha.setAttribute('x', tx); sha.setAttribute('y', cy + 4);
+      sha.setAttribute('x', row.shaX); sha.setAttribute('y', cy + 4);
       sha.setAttribute('class', 'gs-sha');
       sha.textContent = c.short;
       svg.appendChild(sha);
 
       var msg = document.createElementNS(NS, 'text');
-      msg.setAttribute('x', tx + 62); msg.setAttribute('y', cy + 4);
+      msg.setAttribute('y', cy + 4);
       msg.setAttribute('class', 'gs-msg');
-      var m = c.message.length > 46 ? c.message.slice(0, 45) + '…' : c.message;
-      msg.textContent = m;
+      row.lines.forEach(function (line, li) {
+        var ts = document.createElementNS(NS, 'tspan');
+        ts.setAttribute('x', row.msgX);
+        ts.setAttribute('dy', li === 0 ? '0' : String(lineH));
+        ts.textContent = line;
+        msg.appendChild(ts);
+      });
       svg.appendChild(msg);
     });
+  }
+
+  /* ------------------------------ diff panel ------------------------- */
+
+  function renderDiff(node, model) {
+    if (!model) {
+      node.innerHTML = '<div class="gs-diff-empty">Nothing is tracked yet — run <code>git init</code> to start.</div>';
+      return;
+    }
+    if (!model.files.length) {
+      node.innerHTML = '<div class="gs-diff-empty">Working directory clean — no changes since the last commit.</div>';
+      return;
+    }
+    node.innerHTML = model.files.map(function (f) {
+      var rows = f.lines.map(function (l) {
+        var cls = l.t === '+' ? ' gs-diff-add' : (l.t === '-' ? ' gs-diff-del' : '');
+        return '<div class="gs-diff-line' + cls + '">' +
+          '<span class="gs-diff-num">' + (l.a || '') + '</span>' +
+          '<span class="gs-diff-num">' + (l.b || '') + '</span>' +
+          '<span class="gs-diff-sign">' + (l.t === ' ' ? '' : l.t) + '</span>' +
+          '<span class="gs-diff-text">' + esc(l.text) + '</span>' +
+        '</div>';
+      }).join('');
+      return '<div class="gs-diff-file">' +
+        '<div class="gs-diff-filehead">' +
+          '<span class="gs-diff-name">' + esc(f.file) + '</span>' +
+          '<span class="gs-diff-kind gs-diff-kind-' + f.kind + '">' + f.kind + '</span>' +
+        '</div>' + rows +
+      '</div>';
+    }).join('');
   }
 
   /* -------------------------- staging diagram ------------------------ */
@@ -228,9 +301,9 @@
 
     node.innerHTML =
       col('Working directory', 'what you edit', needAdd, 'work') +
-      '<div class="gs-arrow"><span>git add</span>→</div>' +
+      '<div class="gs-arrow"><span>git add</span><i class="gs-arrow-g">→</i></div>' +
       col('Staging area', 'what goes in next commit', staged, 'stage') +
-      '<div class="gs-arrow"><span>git commit</span>→</div>' +
+      '<div class="gs-arrow"><span>git commit</span><i class="gs-arrow-g">→</i></div>' +
       col('Repository', 'permanent history', repoItems, 'repo');
   }
 
@@ -256,7 +329,10 @@
       return null;
     }
 
-    var sb = root.GitSandboxCore.createSandbox({ git: root.git });
+    var sb = root.GitSandboxCore.createSandbox({
+      git: root.git,
+      displayDir: (config.prompt || '~/project').replace(/\s*\$\s*$/, '')
+    });
     var history = [];
     var histIdx = -1;
     var busy = false;
@@ -283,8 +359,15 @@
         '<div class="gs-viz">' +
           '<div class="gs-viz-h">Where your work lives</div>' +
           '<div class="gs-stages"></div>' +
+          '<div class="gs-viz-h">Changes since last commit</div>' +
+          '<div class="gs-diff"></div>' +
           '<div class="gs-viz-h">Commit history</div>' +
           '<div class="gs-graph-scroll"><svg class="gs-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
+          '<div class="gs-remote" hidden>' +
+            '<div class="gs-viz-h">Remote — origin</div>' +
+            '<div class="gs-graph-scroll"><svg class="gs-remote-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
+            '<div class="gs-remote-sync"></div>' +
+          '</div>' +
         '</div>' +
       '</div>' +
       '<div class="gs-tasks"></div>';
@@ -294,9 +377,38 @@
     var input = host.querySelector('.gs-input');
     var hintsNode = host.querySelector('.gs-hints');
     var stagesNode = host.querySelector('.gs-stages');
+    var diffNode = host.querySelector('.gs-diff');
     var svg = host.querySelector('.gs-graph');
+    var remoteWrap = host.querySelector('.gs-remote');
+    var remoteSvg = host.querySelector('.gs-remote-graph');
+    var remoteSync = host.querySelector('.gs-remote-sync');
     var tasksNode = host.querySelector('.gs-tasks');
     var resetBtn = host.querySelector('.gs-reset');
+
+    // The graph is drawn at the SVG's current pixel width, so a later resize
+    // would scale it like an image (tiny text on narrow screens). Redraw the
+    // last model whenever the width actually changes.
+    var lastGraph = null;
+    var lastGraphW = 0;
+    var lastRemoteGraph = null;
+    var lastRemoteGraphW = 0;
+    function redrawGraph() {
+      var w = svg.clientWidth;
+      if (lastGraph && w && w !== lastGraphW) {
+        lastGraphW = w;
+        renderGraph(svg, lastGraph);
+      }
+      var rw = remoteSvg.clientWidth;
+      if (lastRemoteGraph && rw && rw !== lastRemoteGraphW) {
+        lastRemoteGraphW = rw;
+        renderGraph(remoteSvg, lastRemoteGraph);
+      }
+    }
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(redrawGraph).observe(svg.parentNode);
+    } else {
+      root.addEventListener('resize', redrawGraph);
+    }
 
     function write(html, cls) {
       var line = el('div', 'gs-line' + (cls ? ' ' + cls : ''), html);
@@ -355,7 +467,23 @@
         status.untracked = files.slice();
       }
       renderStages(stagesNode, status, graph, files);
+      renderDiff(diffNode, await sb.diffModel());
       renderGraph(svg, graph);
+      lastGraph = graph;
+      lastGraphW = svg.clientWidth;
+
+      var remote = await sb.remoteModel();
+      if (remote) {
+        remoteWrap.hidden = false;
+        renderGraph(remoteSvg, remote.graph);
+        lastRemoteGraph = remote.graph;
+        lastRemoteGraphW = remoteSvg.clientWidth;
+        remoteSync.innerHTML = remoteSyncText(remote);
+      } else {
+        remoteWrap.hidden = true;
+        lastRemoteGraph = null;
+        remoteSync.innerHTML = '';
+      }
 
       // `file x contains "y"` needs file contents; read them up front so the
       // compiled predicates can stay synchronous.
@@ -371,7 +499,7 @@
 
       var ctx = {
         sb: sb, graph: graph, status: status, files: files,
-        history: history, isRepo: isRepo,
+        history: history, isRepo: isRepo, remote: remote,
         _fileText: function (name) { return contents[name] || ''; }
       };
       for (var i = 0; i < tasks.length; i++) {
@@ -405,12 +533,25 @@
       input.focus();
     }
 
+    // one-line summary under the remote graph: how the learner's current
+    // branch compares to its counterpart on the remote
+    function remoteSyncText(r) {
+      if (!r.branch || !r.tracked) return '';
+      var b = esc(r.branch);
+      var n = function (k) { return k + ' commit' + (k === 1 ? '' : 's'); };
+      if (!r.ahead && !r.behind) return '✓ in sync with your <code>' + b + '</code>';
+      if (r.ahead && r.behind) return '<code>origin/' + b + '</code> and your <code>' + b + '</code> have diverged — <code>git pull</code>, then <code>git push</code>';
+      if (r.behind) return '<code>origin/' + b + '</code> is ' + n(r.behind) + ' ahead of your <code>' + b + '</code> — <code>git pull</code> to update';
+      return 'your <code>' + b + '</code> is ' + n(r.ahead) + ' ahead — <code>git push</code> to publish';
+    }
+
     function helpText() {
       return [
         '{w}This sandbox runs real git{/} (isomorphic-git) on a repo that lives only in this page.',
         '',
         '{y}git{/}    init, status, add, commit -m, log [--oneline], diff,',
-        '       branch [-d], checkout [-b], switch [-c], merge, config',
+        '       branch [-d], checkout [-b], switch [-c], merge, config,',
+        '       remote add origin, push [-u], pull, fetch',
         '{y}shell{/}  ls, cat, echo "text" > file, echo "text" >> file, touch, rm, mkdir, pwd',
         '{y}other{/}  help, clear, reset'
       ].join('\n');

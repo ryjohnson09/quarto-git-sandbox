@@ -56,6 +56,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('empty graph message', /No commits yet/.test(host.querySelector('.gs-graph').textContent),
     host.querySelector('.gs-graph').textContent);
   check('stages render 3 columns', host.querySelectorAll('.gs-col').length === 3);
+  check('diff panel prompts for init', /Nothing is tracked yet/.test(host.querySelector('.gs-diff').textContent),
+    host.querySelector('.gs-diff').textContent);
+  check('remote panel hidden without a remote', host.querySelector('.gs-remote').hidden === true);
   check('tasks render', host.querySelectorAll('.gs-task').length === 3);
   check('0 of 3 to start', /0 of 3/.test(host.querySelector('.gs-tasks').textContent),
     host.querySelector('.gs-tasks').textContent);
@@ -67,12 +70,19 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     host.querySelector('.gs-tasks').textContent);
   check('prompt shows branch', /\(main\)/.test(host.querySelector('.gs-prompt').textContent),
     host.querySelector('.gs-prompt').textContent);
+  check('diff panel clean after init', /clean/.test(host.querySelector('.gs-diff').textContent),
+    host.querySelector('.gs-diff').textContent);
 
   await run('echo "# Project" > README.md');
   check('untracked chip in working dir col',
     /README\.md/.test(host.querySelectorAll('.gs-col')[0].textContent) &&
     /untracked/.test(host.querySelectorAll('.gs-col')[0].textContent),
     host.querySelectorAll('.gs-col')[0].textContent);
+  check('diff panel shows new file with + line',
+    /README\.md/.test(host.querySelector('.gs-diff').textContent) &&
+    host.querySelectorAll('.gs-diff-add').length >= 1 &&
+    /# Project/.test(host.querySelector('.gs-diff').textContent),
+    host.querySelector('.gs-diff').innerHTML.slice(0, 300));
 
   await run('git add README.md');
   check('staged chip moves to staging col',
@@ -87,6 +97,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     /1 commit/.test(host.querySelectorAll('.gs-col')[2].textContent),
     host.querySelectorAll('.gs-col')[2].textContent);
   check('graph has 1 node', host.querySelectorAll('.gs-graph circle').length === 1);
+  check('diff panel clean after commit', /clean/.test(host.querySelector('.gs-diff').textContent),
+    host.querySelector('.gs-diff').textContent);
   check('graph shows HEAD ref', /HEAD → main/.test(host.querySelector('.gs-graph').textContent),
     host.querySelector('.gs-graph').textContent);
   check('task 2 ticks', host.querySelectorAll('.gs-task.is-done').length === 2);

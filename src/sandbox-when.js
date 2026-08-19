@@ -292,6 +292,15 @@
           return function (ctx) { return ctx.files.indexOf(fname) !== -1; };
         }
 
+        case 'remote':
+          return function (ctx) { return !!ctx.remote; };
+
+        // true once the current branch's latest commit is on the remote
+        case 'pushed':
+          return function (ctx) {
+            return !!(ctx.remote && ctx.remote.tracked && ctx.remote.ahead === 0);
+          };
+
         case 'ran': {
           var rTok = peek();
           if (!rTok || (rTok.t !== 'regex' && rTok.t !== 'str' && rTok.t !== 'word')) {
@@ -311,7 +320,7 @@
         default:
           throw new Error('unknown condition "' + word + '". Available: repo, clean, staged, ' +
             'commits, commits on <branch>, branch <name>, on <branch>, merged <a> into <b>, ' +
-            'merge commit, file <name> [contains "text"], ran /regex/');
+            'merge commit, file <name> [contains "text"], ran /regex/, remote, pushed');
       }
     }
 

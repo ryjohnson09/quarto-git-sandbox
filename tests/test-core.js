@@ -337,6 +337,110 @@ async function scenario(name, fn) {
     check('seeded files present', JSON.stringify(files) === '["README.md","analysis.R"]', JSON.stringify(files));
   });
 
+  /* ---------------- diff model ---------------- */
+  await scenario('diffModel', async ({ sb, run, check }) => {
+    check('null before init', (await sb.diffModel()) === null);
+    await run('git init');
+    let m = await sb.diffModel();
+    check('empty after init', m.files.length === 0, JSON.stringify(m));
+
+    await run('echo "one" > a.txt');
+    m = await sb.diffModel();
+    check('new file appears', m.files.length === 1 && m.files[0].kind === 'new' && m.files[0].file === 'a.txt',
+      JSON.stringify(m));
+    check('new file is all additions', m.files[0].lines.every(l => l.t === '+'), JSON.stringify(m.files[0].lines));
+
+    await run('git add .');
+    await run('git commit -m "Add a"');
+    m = await sb.diffModel();
+    check('clean after commit', m.files.length === 0, JSON.stringify(m));
+
+    await run('echo "two" >> a.txt');
+    m = await sb.diffModel();
+    check('edited file is modified', m.files.length === 1 && m.files[0].kind === 'modified', JSON.stringify(m));
+    const added = m.files[0].lines.filter(l => l.t === '+');
+    check('addition carries new line number', added.length === 1 && added[0].text === 'two' && added[0].b === 2,
+      JSON.stringify(m.files[0].lines));
+    check('context line numbered on both sides',
+      m.files[0].lines[0].t === ' ' && m.files[0].lines[0].a === 1 && m.files[0].lines[0].b === 1,
+      JSON.stringify(m.files[0].lines));
+
+    await run('rm a.txt');
+    m = await sb.diffModel();
+    check('removed file is deleted, all removals',
+      m.files.length === 1 && m.files[0].kind === 'deleted' && m.files[0].lines.every(l => l.t === '-'),
+      JSON.stringify(m));
+  });
+
+  /* ---------------- remote: push / fetch / pull ---------------- */
+  await scenario('remote', async ({ sb, run, check }) => {
+    await run('git init');
+    let r = await run('git push');
+    check('push without remote fails', !r.ok && /No configured push destination/.test(r.out), r.out);
+
+    await run('git remote add origin https://github.com/acme/sales');
+    r = await run('git remote -v');
+    check('remote -v lists origin', /origin\thttps:\/\/github\.com\/acme\/sales \(fetch\)/.test(r.out), r.out);
+    check('remoteModel exists and is empty', (await sb.remoteModel()).graph.commits.length === 0);
+
+    await run('echo "# Sales" > README.md'); await run('git add .'); await run('git commit -m "Add README"');
+    r = await run('git push');
+    check('push without upstream fails helpfully', !r.ok && /git push -u origin main/.test(r.out), r.out);
+
+    r = await run('git push -u origin main');
+    check('first push says new branch', r.ok && /\* \[new branch\]\s+main -> main/.test(r.out), r.out);
+    check('first push sets upstream', /set up to track 'origin\/main'/.test(r.out), r.out);
+    let m = await sb.remoteModel();
+    check('remote has the commit', m.graph.commits.length === 1 && m.ahead === 0 && m.behind === 0, JSON.stringify(m.graph.commits));
+
+    r = await run('git push');
+    check('repeat push is up-to-date', r.ok && /Everything up-to-date/.test(r.out), r.out);
+
+    // colleague pushes while we were away: commit, push, rewind
+    await run('echo "arima(sales)" > forecast.R'); await run('git add .'); await run('git commit -m "Colleague forecast"');
+    await run('git push');
+    r = await run('rewind 1');
+    check('rewind ok', r.ok, r.out);
+    m = await sb.remoteModel();
+    check('remote is ahead after rewind', m.behind === 1 && m.ahead === 0, JSON.stringify({ ahead: m.ahead, behind: m.behind }));
+    let g = await sb.graphModel();
+    check('local graph does not know yet', g.commits.length === 1, String(g.commits.length));
+
+    r = await run('git push');
+    check('stale push rejected', !r.ok && /\[rejected\]/.test(r.out) && /fetch first/.test(r.out), r.out);
+
+    r = await run('git fetch');
+    check('fetch reports the new commit', r.ok && /-> origin\/main/.test(r.out), r.out);
+    g = await sb.graphModel();
+    check('origin/main pill appears after fetch',
+      g.commits.length === 2 && g.commits.some(c => c.refs.some(rf => rf.name === 'origin/main' && rf.remote)),
+      JSON.stringify(g.commits.map(c => c.refs)));
+
+    r = await run('git pull');
+    check('pull fast-forwards', r.ok && /Fast-forward/.test(r.out), r.out);
+    r = await run('git pull');
+    check('second pull up to date', r.ok && /Already up to date/.test(r.out), r.out);
+
+    // diverge: remote-only commit + local-only commit -> pull merges
+    await run('echo "x" > x.md'); await run('git add .'); await run('git commit -m "Remote-only"');
+    await run('git push');
+    await run('rewind 1');
+    await run('echo "y" > y.md'); await run('git add .'); await run('git commit -m "Local-only"');
+    r = await run('git pull');
+    check('diverged pull makes a merge commit', r.ok && /Merge made by/.test(r.out), r.out);
+    r = await run('git log --oneline');
+    const shas = r.out.trim().split('\n').map(l => l.slice(0, 7));
+    check('log has no duplicates after merge', new Set(shas).size === shas.length, r.out);
+
+    r = await run('git push');
+    check('push after merge succeeds', r.ok && /main -> main/.test(r.out), r.out);
+    m = await sb.remoteModel();
+    check('in sync at the end', m.ahead === 0 && m.behind === 0, JSON.stringify({ ahead: m.ahead, behind: m.behind }));
+
+    await sb.reset();
+    check('reset clears the remote', (await sb.remoteModel()) === null);
+  });
+
   /* ---------------- report ---------------- */
   console.log('\n===== TRANSCRIPT: core happy path =====');
   console.log(mainLog.join('\n'));
