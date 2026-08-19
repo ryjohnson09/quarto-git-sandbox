@@ -6,11 +6,14 @@
 
 Interactive Git exercises for Quarto documents. Each exercise is a **real Git
 repository running in the reader's browser** — learners type real `git`
-commands and watch a working-directory/staging/repository diagram and a live
-commit graph update as they go.
+commands and watch a working-directory/staging/repository diagram, a live
+diff of what changed, and a live commit graph update as they go. Exercises
+can also add a **mock remote**: a second repository inside the page that
+learners `push` to, `fetch` and `pull` from, drawn as its own commit graph —
+including realistic rejected pushes when the remote is ahead.
 
-Nothing is installed, nothing is uploaded, nothing is written to disk. The
-repository lives in memory and disappears on reload.
+Nothing is installed, nothing is uploaded, nothing is written to disk.
+Both repositories live in memory and disappear on reload.
 
 ```markdown
 ```git-sandbox
@@ -44,8 +47,9 @@ filters:
 ---
 ```
 
-`example.qmd` in this repository is a complete three-exercise lesson. Render it
-to see everything working:
+`example.qmd` in this repository is a complete six-exercise lesson — from
+first commit through diffs, branching, merging, and pushing to a remote.
+Render it to see everything working:
 
 ```bash
 quarto render example.qmd
@@ -104,6 +108,34 @@ Two notes on quoting, because both bite:
 `seed` failures are loud. If a seed command fails, the exercise says so rather
 than dropping the learner into a half-built repository.
 
+### Seeding a remote
+
+Running `git remote add origin <url>` in a seed (or by the learner) creates
+the mock remote and reveals the **Remote — origin** panel. To stage the
+classic "a colleague pushed while you were away" scenario, make the
+colleague's commits, push them, then use the authoring-only `rewind <n>`
+command to move the local branch back — the commits now exist only on the
+remote, ready to be discovered with `git fetch` and brought in with
+`git pull`:
+
+```yaml
+seed: |
+  git init
+  git remote add origin https://github.com/acme/sales-analysis
+  echo "# Sales analysis" > README.md
+  git add .
+  git commit -m "Add the project README"
+  git push -u origin main
+  echo "arima(sales)" > forecast.R
+  git add .
+  git commit -m "Add a first forecast model"
+  git push
+  rewind 1
+```
+
+Pushing when the remote is ahead is rejected with git's real `(fetch first)`
+message, so the push → rejected → pull → push loop can be taught honestly.
+
 ## Conditions: the `when:` language
 
 A task ticks when its condition becomes true, and stays ticked afterwards — so
@@ -123,6 +155,8 @@ you can check for states the learner passes through.
 | `file report.qmd` | That file exists in the working directory |
 | `file report.qmd contains "Q3"` | It exists and contains that text. `/regex/` works too |
 | `ran /git\s+status/` | The learner ran a matching command. Plain text matches as a substring |
+| `remote` | A remote has been configured with `git remote add origin` |
+| `pushed` | Every commit on the current branch is on the remote |
 
 Combine with `and`, `or`, `not` and parentheses. `and` binds tighter than `or`.
 
@@ -164,6 +198,7 @@ tasks:
 | `c.status` | `{ staged, modified, untracked, deleted, stagedDeleted }` |
 | `c.files` | Filenames in the working directory |
 | `c.history` | Every command typed, in order |
+| `c.remote` | `null`, or `{ url, branch, tracked, ahead, behind, graph }` once a remote exists |
 | `c.sb` | The sandbox, for `await c.sb.readFile('notes.txt')` |
 
 `js:` uses `new Function`, so it needs `'unsafe-eval'` in your Content Security
@@ -173,22 +208,30 @@ Policy. `when:` does not — another reason to prefer it.
 
 **Git** — `init`, `status`, `add`, `rm`, `commit -m`, `log [--oneline]`,
 `diff`, `branch [-d]`, `checkout [-b]`, `switch [-c]`, `merge`,
-`config user.name|user.email`
+`remote [-v] | remote add origin <url>`, `push [-u origin <branch>]`,
+`fetch`, `pull`, `config user.name|user.email`
 
 **Shell** — `ls [-a]`, `cat`, `echo "…" > file`, `echo "…" >> file`, `touch`,
-`rm`, `mkdir`, `pwd`, `whoami`, plus `help`, `clear`, `reset`
+`rm`, `mkdir`, `pwd`, `whoami`, plus `help`, `clear`, `reset`, and the
+authoring-only `rewind <n>`
+
+The remote is a bare repository elsewhere in the same in-memory filesystem.
+Push and fetch move objects and refs between the two repositories with real
+semantics: the first push needs `-u origin <branch>`, `origin/*` tracking
+refs appear in the local graph after a fetch, and a non-fast-forward push is
+rejected with `(fetch first)`.
 
 Up arrow recalls previous commands. **Reset** returns the exercise to its
 seeded state.
 
 ## What it does not do, on purpose
 
-- **No remotes.** `push`, `pull`, `clone` and `fetch` need a server.
-  isomorphic-git can talk to GitHub through a CORS proxy, which is a real but
-  separate piece of work.
+- **No network remotes.** The remote is a mock that lives in the page — there
+  is no `clone`, and nothing talks to a real server. isomorphic-git can talk
+  to GitHub through a CORS proxy, which is a real but separate piece of work.
 - **No conflict resolution.** isomorphic-git merges cleanly or fails. A
-  conflict prints an explanation and suggests resetting, so a lesson stays
-  honest about the limit rather than faking it.
+  conflicting `merge` or `pull` prints an explanation and suggests resetting,
+  so a lesson stays honest about the limit rather than faking it.
 - **No `rebase`, `stash`, `reset --hard`, `cherry-pick` or `revert`.** These
   could be added to the engine in `src/sandbox-core.js`.
 
@@ -223,7 +266,7 @@ document.
 npm install          # dev dependencies only; the extension itself needs none
 ./build.sh           # rebuild _extensions/.../git-sandbox.js from src/
 ./build.sh --vendor  # also re-bundle isomorphic-git
-./tests/run.sh       # all six suites
+./tests/run.sh       # all seven suites
 ```
 
 `_extensions/git-sandbox/resources/git-sandbox.js` is generated. Edit `src/`
