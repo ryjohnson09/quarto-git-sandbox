@@ -60,6 +60,21 @@
   color: var(--gs-blue-500);
 }
 
+/* Repo/remote status pills. margin-right: auto keeps them beside the title
+   while the Reset button stays pinned to the right edge. */
+.gs-state { display: flex; gap: 6px; margin-right: auto; }
+.gs-state-pill {
+  font-family: var(--gs-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.gs-state-none  { color: var(--gs-gray-body); border: 1px dashed var(--gs-blue-100); }
+.gs-state-repo  { background: var(--gs-blue-50); color: var(--gs-blue-500); }
+.gs-state-remote { background: #DBE6D3; color: #394D27; }
+
 .gs-reset {
   font-family: var(--gs-mono);
   font-size: 12px;
@@ -242,6 +257,8 @@
 .gs-chip-stage { background: #DBE6D3; color: #394D27; }
 .gs-chip-repo  { background: #D0DBE5; color: #22384C; }
 .gs-chip-empty { background: transparent; color: var(--gs-gray-body); font-style: italic; }
+/* A tracked file with no changes: present but quiet, so modified files pop. */
+.gs-chip-work.gs-chip-clean { background: var(--gs-off-white); color: var(--gs-gray-body); }
 
 .gs-arrow {
   display: flex;

@@ -59,6 +59,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('diff panel prompts for init', /Nothing is tracked yet/.test(host.querySelector('.gs-diff').textContent),
     host.querySelector('.gs-diff').textContent);
   check('remote panel hidden without a remote', host.querySelector('.gs-remote').hidden === true);
+  check('state pill says no repository before init',
+    /no repository/.test(host.querySelector('.gs-state').textContent),
+    host.querySelector('.gs-state').innerHTML);
   check('tasks render', host.querySelectorAll('.gs-task').length === 3);
   check('0 of 3 to start', /0 of 3/.test(host.querySelector('.gs-tasks').textContent),
     host.querySelector('.gs-tasks').textContent);
@@ -70,6 +73,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     host.querySelector('.gs-tasks').textContent);
   check('prompt shows branch', /\(main\)/.test(host.querySelector('.gs-prompt').textContent),
     host.querySelector('.gs-prompt').textContent);
+  check('state pill flips to repository after init',
+    /repository/.test(host.querySelector('.gs-state').textContent) &&
+    !/no repository/.test(host.querySelector('.gs-state').textContent) &&
+    !/origin/.test(host.querySelector('.gs-state').textContent),
+    host.querySelector('.gs-state').innerHTML);
   check('diff panel clean after init', /clean/.test(host.querySelector('.gs-diff').textContent),
     host.querySelector('.gs-diff').textContent);
 
@@ -102,6 +110,23 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('graph shows HEAD ref', /HEAD → main/.test(host.querySelector('.gs-graph').textContent),
     host.querySelector('.gs-graph').textContent);
   check('task 2 ticks', host.querySelectorAll('.gs-task.is-done').length === 2);
+
+  const workCol = () => host.querySelectorAll('.gs-col')[0];
+  check('committed file shows as unchanged chip in working dir',
+    /README\.md/.test(workCol().textContent) &&
+    workCol().querySelectorAll('.gs-chip-clean').length === 1,
+    workCol().innerHTML);
+
+  await run('echo "edited" > README.md');
+  check('editing swaps unchanged chip for modified',
+    /modified/.test(workCol().textContent) &&
+    workCol().querySelectorAll('.gs-chip-clean').length === 0,
+    workCol().innerHTML);
+
+  await run('echo "# Project" > README.md');
+  check('restoring committed content brings the unchanged chip back',
+    workCol().querySelectorAll('.gs-chip-clean').length === 1,
+    workCol().innerHTML);
 
   await run('git checkout -b feature');
   await run('echo "feature" > feature.txt');
@@ -144,6 +169,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('reset unticks tasks', host.querySelectorAll('.gs-task.is-done').length === 0,
     host.querySelector('.gs-tasks').textContent);
   check('reset restores intro', /sandbox/.test(host.querySelector('.gs-out').textContent));
+  check('reset returns state pill to no repository',
+    /no repository/.test(host.querySelector('.gs-state').textContent),
+    host.querySelector('.gs-state').innerHTML);
 
   // rebuild a graph and dump the SVG for visual inspection
   await run('git init');
@@ -154,6 +182,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await run('git checkout main');
   await run('echo d > d.txt'); await run('git add .'); await run('git commit -m "Fix a typo in the README"');
   await run('git merge analysis');
+
+  await run('git remote add origin https://example.com/demo.git');
+  check('state shows origin pill once a remote exists',
+    /repository/.test(host.querySelector('.gs-state').textContent) &&
+    /origin/.test(host.querySelector('.gs-state').textContent),
+    host.querySelector('.gs-state').innerHTML);
 
   const svg = host.querySelector('.gs-graph');
   const style = `<style>

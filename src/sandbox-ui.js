@@ -281,10 +281,20 @@
     var staged = status.staged.map(function (s) { return { f: s.file, k: s.kind }; })
       .concat(status.stagedDeleted.map(function (f) { return { f: f, k: 'deleted' }; }));
 
+    // Committed-and-clean files have no git status, but the learner still
+    // needs to see they exist — otherwise "edit notes.txt" points at a column
+    // that claims to be empty.
+    var accounted = {};
+    needAdd.concat(staged).forEach(function (it) { accounted[it.f] = true; });
+    var clean = (files || [])
+      .filter(function (f) { return !accounted[f]; })
+      .map(function (f) { return { f: f, k: 'unchanged' }; });
+
     function col(title, note, items, kind) {
       var chips = items.length
         ? items.map(function (it) {
-            return '<span class="gs-chip gs-chip-' + kind + '">' + esc(it.f) +
+            var cls = 'gs-chip gs-chip-' + kind + (it.k === 'unchanged' ? ' gs-chip-clean' : '');
+            return '<span class="' + cls + '">' + esc(it.f) +
                    '<span class="gs-chip-k">' + esc(it.k) + '</span></span>';
           }).join('')
         : '<span class="gs-chip gs-chip-empty">empty</span>';
@@ -300,7 +310,7 @@
       : [];
 
     node.innerHTML =
-      col('Working directory', 'what you edit', needAdd, 'work') +
+      col('Working directory', 'what you edit', needAdd.concat(clean), 'work') +
       '<div class="gs-arrow"><span>git add</span><i class="gs-arrow-g">→</i></div>' +
       col('Staging area', 'what goes in next commit', staged, 'stage') +
       '<div class="gs-arrow"><span>git commit</span><i class="gs-arrow-g">→</i></div>' +
@@ -344,6 +354,7 @@
     host.innerHTML =
       '<div class="gs-head">' +
         '<span class="gs-eyebrow">' + esc(config.title || 'Git sandbox') + '</span>' +
+        '<span class="gs-state" role="status"></span>' +
         '<button type="button" class="gs-reset">Reset</button>' +
       '</div>' +
       '<div class="gs-body">' +
@@ -383,7 +394,9 @@
     var remoteSvg = host.querySelector('.gs-remote-graph');
     var remoteSync = host.querySelector('.gs-remote-sync');
     var tasksNode = host.querySelector('.gs-tasks');
+    var stateNode = host.querySelector('.gs-state');
     var resetBtn = host.querySelector('.gs-reset');
+    var lastStateHtml = '';
 
     // The graph is drawn at the SVG's current pixel width, so a later resize
     // would scale it like an image (tiny text on narrow screens). Redraw the
@@ -483,6 +496,16 @@
         remoteWrap.hidden = true;
         lastRemoteGraph = null;
         remoteSync.innerHTML = '';
+      }
+
+      var stateHtml = !isRepo
+        ? '<span class="gs-state-pill gs-state-none">○ no repository</span>'
+        : '<span class="gs-state-pill gs-state-repo">● repository</span>' +
+          (remote ? '<span class="gs-state-pill gs-state-remote">⇄ origin</span>' : '');
+      // role="status" announces DOM changes, so only touch it on a real change.
+      if (stateHtml !== lastStateHtml) {
+        stateNode.innerHTML = stateHtml;
+        lastStateHtml = stateHtml;
       }
 
       // `file x contains "y"` needs file contents; read them up front so the
