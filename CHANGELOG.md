@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1
+
+- Reset now clears the command history, so tasks checked with `ran "..."`
+  no longer re-complete themselves immediately after a reset.
+- Reset also clears any text left in the terminal input.
+- Typing `reset` as a command no longer leaves the word `reset` itself in
+  the freshly cleared history.
+
 ## 1.0.0
 
 First release.

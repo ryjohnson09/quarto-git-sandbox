@@ -2117,13 +2117,13 @@
       busy = true;
       input.disabled = true;
       write('<span class="gs-echo-prompt">' + esc(host.querySelector('.gs-prompt').textContent) + '</span> ' + esc(line), 'gs-echo');
+      history.push(line);
+      histIdx = history.length;
       var r = await sb.run(line);
       if (line.trim() === 'clear') { out.innerHTML = ''; }
       else if (line.trim() === 'help') { writeText(helpText()); }
       else if (line.trim() === 'reset') { await doReset(); }
       else { writeText(r.out, r.ok ? '' : 'gs-err'); }
-      history.push(line);
-      histIdx = history.length;
       await refresh();
       input.disabled = false;
       busy = false;
@@ -2156,6 +2156,11 @@
 
     async function doReset() {
       out.innerHTML = '';
+      input.value = '';
+      // Tasks checked with `ran "..."` read the command history, so it has to
+      // go too or they re-complete themselves on the very next refresh.
+      history.length = 0;
+      histIdx = 0;
       tasks.forEach(function (t) { t._done = false; });
       try {
         await sb.reset(seed);
