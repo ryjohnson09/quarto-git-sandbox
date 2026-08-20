@@ -161,6 +161,11 @@
 }
 .gs-input:focus-visible { box-shadow: 0 2px 0 0 var(--gs-orange); }
 .gs-input:disabled { opacity: 0.6; }
+/* The invitation to type; fades once the input is focused so the caret owns
+   the line. Chrome/Safari default placeholder grey is unreadable on the dark
+   terminal, hence the explicit color. */
+.gs-input::placeholder { color: var(--gs-t-dim); opacity: 0.75; font-style: italic; }
+.gs-input:focus::placeholder { opacity: 0.35; }
 
 .gs-hints {
   display: flex;

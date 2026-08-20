@@ -53,6 +53,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('intro rendered with markup', /class="ty"/.test(host.querySelector('.gs-out').innerHTML),
     host.querySelector('.gs-out').innerHTML);
   check('hint buttons rendered', host.querySelectorAll('.gs-hint').length === 2);
+  check('input has a type-here placeholder',
+    /press Enter/.test(host.querySelector('.gs-input').getAttribute('placeholder') || ''),
+    host.querySelector('.gs-input').outerHTML);
   check('empty graph message', /No commits yet/.test(host.querySelector('.gs-graph').textContent),
     host.querySelector('.gs-graph').textContent);
   check('stages render 3 columns', host.querySelectorAll('.gs-col').length === 3);

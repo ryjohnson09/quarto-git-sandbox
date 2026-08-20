@@ -1939,7 +1939,8 @@
           '<form class="gs-input-row" autocomplete="off">' +
             '<label class="gs-prompt" for="' + (host.id || 'gs') + '-in">' + esc(config.prompt || '~/project $') + '</label>' +
             '<input class="gs-input" id="' + (host.id || 'gs') + '-in" type="text" spellcheck="false"' +
-            ' autocapitalize="off" autocorrect="off" aria-label="Type a git command">' +
+            ' autocapitalize="off" autocorrect="off" aria-label="Type a git command"' +
+            ' placeholder="type a command and press Enter">' +
           '</form>' +
           '<div class="gs-hints"></div>' +
         '</div>' +
