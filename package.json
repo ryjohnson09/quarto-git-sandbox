@@ -1,6 +1,6 @@
 {
   "name": "quarto-git-sandbox",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Development dependencies for the quarto-git-sandbox extension. The extension itself ships as plain files and needs no build step to use.",
   "license": "MIT",

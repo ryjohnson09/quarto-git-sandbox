@@ -293,6 +293,11 @@
     var remoteGitdir = '/origin';
     var remoteUrl = null;
     var upstreams = {};   // branch name -> true once `push -u` recorded it
+    // Merges that actually moved a ref ({ from, into }), via `git merge` or
+    // `git pull`. The graph alone cannot distinguish "freshly branched off Y"
+    // from "fast-forward merged into Y" — both leave X's tip an ancestor of
+    // Y's — so `merged X into Y` conditions need this record.
+    var mergesDone = [];
     var author = { name: 'Your Name', email: 'you@example.com' };
     var defaultBranch = options.defaultBranch || 'main';
     var repoReady = false;
@@ -486,7 +491,7 @@
     }
 
     async function graphModel() {
-      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false };
+      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false, merges: [] };
 
       var branches = await gitlib.listBranches(opts());
       var head = await currentBranch();
@@ -525,7 +530,8 @@
         branches: branches.map(function (b) { return { name: b, oid: refs[b] || null, isHead: b === head }; }),
         head: head,
         headOid: headOid,
-        detached: head === null && headOid !== null
+        detached: head === null && headOid !== null,
+        merges: mergesDone.slice()
       };
     }
 
@@ -812,6 +818,7 @@
           // bring the working directory in line with the new ref
           await gitlib.checkout(opts({ ref: ours, force: true }));
           if (result.alreadyMerged) return { out: 'Already up to date.', ok: true };
+          mergesDone.push({ from: theirs, into: ours });
           if (result.fastForward) return { out: 'Updating ' + (result.oid || '').slice(0, 7) + '\nFast-forward', ok: true };
           return { out: "Merge made by the 'recursive' strategy.", ok: true };
         }
@@ -927,6 +934,7 @@
           }
           await gitlib.checkout(opts({ ref: lbr, force: true }));
           if (pres.alreadyMerged) return { out: prefix2 + 'Already up to date.', ok: true };
+          mergesDone.push({ from: 'origin/' + lbr, into: lbr });
           if (pres.fastForward) return { out: prefix2 + 'Updating ' + oursOid.slice(0, 7) + '..' + theirOid.slice(0, 7) + '\nFast-forward', ok: true };
           return { out: prefix2 + "Merge made by the 'recursive' strategy.", ok: true };
         }
@@ -1156,6 +1164,7 @@
       repoReady = false;
       remoteUrl = null;
       upstreams = {};
+      mergesDone = [];
       author = { name: 'Your Name', email: 'you@example.com' };
       await ensureWorkdir();
       if (seed) await seed(api);
@@ -1459,8 +1468,21 @@
           }
           next();
           var target = expectWord('a branch name after "into"');
+          // Ancestry alone would be trivially true the moment X is branched
+          // off Y (X's tip is already an ancestor of Y's), so a real merge
+          // must also have been recorded by the sandbox. The ancestry check
+          // still matters: it goes false again if Y is later rewound past
+          // the merge. When either branch no longer exists (deleted after
+          // merging, or a remote-tracking name), the record alone decides.
           return function (ctx) {
-            return reaches(ctx, branchOid(ctx, target), branchOid(ctx, from));
+            var recorded = (ctx.graph.merges || []).some(function (m) {
+              return m.from === from && m.into === target;
+            });
+            if (!recorded) return false;
+            var fromOid = branchOid(ctx, from);
+            var intoOid = branchOid(ctx, target);
+            if (!fromOid || !intoOid) return true;
+            return reaches(ctx, intoOid, fromOid);
           };
         }
 
@@ -2231,9 +2253,20 @@
     return false;
   }
 
-  // has branch `name` been merged into branch `into`?
+  // Has branch `name` been merged into branch `into`? Requires a merge the
+  // sandbox actually recorded, not just ancestry — a branch freshly created
+  // from `into`'s tip is already an ancestor of it, and a completed
+  // fast-forward merge leaves the identical graph, so ancestry alone cannot
+  // tell the two apart.
   function isMerged(graph, name, into) {
-    return reaches(graph, branchOid(graph, into), branchOid(graph, name));
+    var recorded = (graph.merges || []).some(function (m) {
+      return m.from === name && m.into === into;
+    });
+    if (!recorded) return false;
+    var fromOid = branchOid(graph, name);
+    var intoOid = branchOid(graph, into);
+    if (!fromOid || !intoOid) return true;
+    return reaches(graph, intoOid, fromOid);
   }
 
   // how many commits are reachable from a branch tip

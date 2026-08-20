@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.2
+
+- `merged X into Y` now requires a merge to have actually happened. It was an
+  ancestry check, which is trivially true the moment X is branched off Y's tip,
+  so "merge X into Y" tasks checked off before any merge occurred. The sandbox
+  now records ref-moving merges (`git merge` and `git pull`, fast-forward or
+  merge commit; not "Already up to date"), and the condition requires one, plus
+  the merge result still being in Y's history. Compound guards like
+  `merged X into Y and commits on X >= N` are no longer needed.
+- `merged X into Y` also stays true after the merged branch is deleted.
+- The `GitSandboxUI.isMerged(graph, name, into)` helper follows the same
+  semantics, using the new `graph.merges` record.
+
 ## 1.0.1
 
 - Reset now clears the command history, so tasks checked with `ran "..."`

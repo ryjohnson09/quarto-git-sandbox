@@ -283,6 +283,11 @@
     var remoteGitdir = '/origin';
     var remoteUrl = null;
     var upstreams = {};   // branch name -> true once `push -u` recorded it
+    // Merges that actually moved a ref ({ from, into }), via `git merge` or
+    // `git pull`. The graph alone cannot distinguish "freshly branched off Y"
+    // from "fast-forward merged into Y" — both leave X's tip an ancestor of
+    // Y's — so `merged X into Y` conditions need this record.
+    var mergesDone = [];
     var author = { name: 'Your Name', email: 'you@example.com' };
     var defaultBranch = options.defaultBranch || 'main';
     var repoReady = false;
@@ -476,7 +481,7 @@
     }
 
     async function graphModel() {
-      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false };
+      if (!(await isRepo())) return { commits: [], branches: [], head: null, detached: false, merges: [] };
 
       var branches = await gitlib.listBranches(opts());
       var head = await currentBranch();
@@ -515,7 +520,8 @@
         branches: branches.map(function (b) { return { name: b, oid: refs[b] || null, isHead: b === head }; }),
         head: head,
         headOid: headOid,
-        detached: head === null && headOid !== null
+        detached: head === null && headOid !== null,
+        merges: mergesDone.slice()
       };
     }
 
@@ -802,6 +808,7 @@
           // bring the working directory in line with the new ref
           await gitlib.checkout(opts({ ref: ours, force: true }));
           if (result.alreadyMerged) return { out: 'Already up to date.', ok: true };
+          mergesDone.push({ from: theirs, into: ours });
           if (result.fastForward) return { out: 'Updating ' + (result.oid || '').slice(0, 7) + '\nFast-forward', ok: true };
           return { out: "Merge made by the 'recursive' strategy.", ok: true };
         }
@@ -917,6 +924,7 @@
           }
           await gitlib.checkout(opts({ ref: lbr, force: true }));
           if (pres.alreadyMerged) return { out: prefix2 + 'Already up to date.', ok: true };
+          mergesDone.push({ from: 'origin/' + lbr, into: lbr });
           if (pres.fastForward) return { out: prefix2 + 'Updating ' + oursOid.slice(0, 7) + '..' + theirOid.slice(0, 7) + '\nFast-forward', ok: true };
           return { out: prefix2 + "Merge made by the 'recursive' strategy.", ok: true };
         }
@@ -1146,6 +1154,7 @@
       repoReady = false;
       remoteUrl = null;
       upstreams = {};
+      mergesDone = [];
       author = { name: 'Your Name', email: 'you@example.com' };
       await ensureWorkdir();
       if (seed) await seed(api);

@@ -151,7 +151,7 @@ you can check for states the learner passes through.
 | `commits on report >= 2` | Two commits are reachable from the `report` branch |
 | `branch report` | A branch called `report` exists |
 | `on main` | `HEAD` is on `main` |
-| `merged report into main` | `report`'s tip is an ancestor of `main`'s tip |
+| `merged report into main` | A `git merge` (or `git pull`) has actually brought `report` into `main`, and its result is still in `main`'s history. Both fast-forward and merge-commit merges count; creating `report` from `main`'s tip does not, and neither does a merge that reports "Already up to date" |
 | `merge commit` | Some commit has two parents |
 | `file report.qmd` | That file exists in the working directory |
 | `file report.qmd contains "Q3"` | It exists and contains that text. `/regex/` works too |

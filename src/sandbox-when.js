@@ -268,8 +268,21 @@
           }
           next();
           var target = expectWord('a branch name after "into"');
+          // Ancestry alone would be trivially true the moment X is branched
+          // off Y (X's tip is already an ancestor of Y's), so a real merge
+          // must also have been recorded by the sandbox. The ancestry check
+          // still matters: it goes false again if Y is later rewound past
+          // the merge. When either branch no longer exists (deleted after
+          // merging, or a remote-tracking name), the record alone decides.
           return function (ctx) {
-            return reaches(ctx, branchOid(ctx, target), branchOid(ctx, from));
+            var recorded = (ctx.graph.merges || []).some(function (m) {
+              return m.from === from && m.into === target;
+            });
+            if (!recorded) return false;
+            var fromOid = branchOid(ctx, from);
+            var intoOid = branchOid(ctx, target);
+            if (!fromOid || !intoOid) return true;
+            return reaches(ctx, intoOid, fromOid);
           };
         }
 

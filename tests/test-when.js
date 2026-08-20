@@ -153,6 +153,39 @@ function evalWhen(expr, ctx) {
       evalWhen('on main and merged report into main', ctx) === true);
   }
 
+  /* ------------------- freshly created branch is not "merged" ------------------- */
+  {
+    // A branch created at Y's tip is already an ancestor of Y, and a completed
+    // fast-forward merge leaves the identical graph — so `merged` must not be
+    // satisfiable by ancestry alone (it once was, checking off "merge draft
+    // into main" tasks the moment the branch was created).
+    const sb = await build([
+      'git init', 'echo base > base.txt', 'git add .', 'git commit -m "base"',
+      'git switch -c draft', 'git switch main'
+    ]);
+    let ctx = await contextFor(sb);
+    check('fresh branch level with main is not merged',
+      evalWhen('merged draft into main', ctx) === false);
+
+    // `git merge draft` reporting "Already up to date." moved nothing, so it
+    // still does not count as a merge.
+    await sb.run('git merge draft');
+    sb.__history.push('git merge draft');
+    ctx = await contextFor(sb);
+    check('"Already up to date" merge does not count',
+      evalWhen('merged draft into main', ctx) === false);
+
+    // A real commit on the branch followed by a fast-forward merge does.
+    for (const c of ['git switch draft', 'echo d > draft.qmd', 'git add .',
+                     'git commit -m "draft"', 'git switch main', 'git merge draft']) {
+      await sb.run(c);
+      sb.__history.push(c);
+    }
+    ctx = await contextFor(sb);
+    check('merged after commit + fast-forward merge',
+      evalWhen('merged draft into main', ctx) === true);
+  }
+
   /* ------------------- true merge commit ------------------- */
   {
     const sb = await build([
@@ -179,6 +212,8 @@ function evalWhen(expr, ctx) {
     check('branch gone after delete', evalWhen('branch forecast', ctx) === false);
     check('not branch forecast', evalWhen('not branch forecast', ctx) === true);
     check('merge commit survives branch deletion', evalWhen('merge commit', ctx) === true);
+    check('merged survives branch deletion',
+      evalWhen('merged forecast into main', ctx) === true);
   }
 
   /* ------------------- filesNeeded ------------------- */

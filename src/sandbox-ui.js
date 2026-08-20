@@ -657,9 +657,20 @@
     return false;
   }
 
-  // has branch `name` been merged into branch `into`?
+  // Has branch `name` been merged into branch `into`? Requires a merge the
+  // sandbox actually recorded, not just ancestry — a branch freshly created
+  // from `into`'s tip is already an ancestor of it, and a completed
+  // fast-forward merge leaves the identical graph, so ancestry alone cannot
+  // tell the two apart.
   function isMerged(graph, name, into) {
-    return reaches(graph, branchOid(graph, into), branchOid(graph, name));
+    var recorded = (graph.merges || []).some(function (m) {
+      return m.from === name && m.into === into;
+    });
+    if (!recorded) return false;
+    var fromOid = branchOid(graph, name);
+    var intoOid = branchOid(graph, into);
+    if (!fromOid || !intoOid) return true;
+    return reaches(graph, intoOid, fromOid);
   }
 
   // how many commits are reachable from a branch tip
