@@ -281,7 +281,8 @@ and rebuild. See `CONTRIBUTING.md`.
 
 ## Licence
 
-MIT; see `LICENSE`.
+MIT; see `LICENSE`. Bundled third-party software is listed in
+`THIRD_PARTY_NOTICES.md`.
 
 `_extensions/git-sandbox/resources/isomorphic-git.bundle.js` bundles
 [isomorphic-git](https://isomorphic-git.org) and

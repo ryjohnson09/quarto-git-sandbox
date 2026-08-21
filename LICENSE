@@ -19,11 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This extension bundles third-party software in
-_extensions/git-sandbox/resources/isomorphic-git.bundle.js:
-
-  isomorphic-git — MIT — https://github.com/isomorphic-git/isomorphic-git
-  buffer         — MIT — https://github.com/feross/buffer
