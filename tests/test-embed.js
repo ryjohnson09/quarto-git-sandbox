@@ -14,7 +14,7 @@ const win=dom.window, sleep=ms=>new Promise(r=>setTimeout(r,ms));
   for(let i=0;i<150 && !win.document.querySelector('.gs-task');i++) await sleep(80);
   await sleep(200);
   let p=0,f=0; const ck=(l,c,d)=>{c?p++:(f++,console.log(' FAIL',l,d||''));};
-  const host=win.document.querySelector('#demo');
+  const host=win.document.querySelector('#anatomy');
   ck('git loaded', typeof win.git==='object' && typeof win.git.init==='function');
   ck('Buffer polyfill present', typeof win.Buffer!=='undefined');
   ck('mounted', !!host.querySelector('.gs-input'), host.textContent.slice(0,120));
@@ -22,11 +22,12 @@ const win=dom.window, sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const type=async l=>{for(let i=0;i<200&&input.disabled;i++)await sleep(40);
     input.value=l; form.dispatchEvent(new win.Event('submit',{bubbles:true,cancelable:true}));
     for(let i=0;i<200&&input.disabled;i++)await sleep(40); await sleep(20);};
-  for(const c of ['git init','echo hi > notes.txt','git add .','git commit -m "First commit"',
-                  'git checkout -b topic','echo more >> notes.txt','git add .','git commit -m "More"',
-                  'git checkout main','git merge topic']) await type(c);
+  const graph=()=>{const g=host.querySelector('.gs-graph');return g?g.textContent:'';};
+  ck('seed left two commits', /Start the analysis/.test(graph()), graph().slice(0,160));
+  for(const c of ['git status','echo "A new line." >> README.md','git add .',
+                  'git commit -m "Extend the README"']) await type(c);
   const done=host.querySelectorAll('.gs-task.is-done').length;
-  ck('all 3 tasks complete', done===3, 'done='+done+' :: '+host.querySelector('.gs-tasks').textContent);
+  ck('all 4 tasks complete', done===4, 'done='+done+' :: '+host.querySelector('.gs-tasks').textContent);
   ck('no script errors', errs.length===0, errs.join(' | '));
   console.log('example-embed.html — passed: '+p+'   failed: '+f);
   process.exit(f?1:0);

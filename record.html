@@ -3,34 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Git sandbox: standalone embed</title>
+<title>Git sandbox: recording page</title>
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;700&family=Source+Code+Pro:wght@400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="_extensions/git-sandbox/resources/git-sandbox.css">
 <style>
+  /*
+    A chrome-free page for screen recording. The box is the only thing on
+    the page, its top edge never moves, and its total height never changes,
+    so a recording frame set once stays framed.
+  */
   body {
     font-family: "Open Sans", system-ui, sans-serif;
-    color: #404041;
     background: #FFFFFF;
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 24px 20px 60px;
-    line-height: 1.6;
+    margin: 0;
+    padding: 24px;
   }
+  .git-sandbox { max-width: 980px; margin: 0 auto; }
+
+  /* The terminal is already a fixed 340px. These pin the two parts that
+     normally grow or shrink with their content. */
+
+  /* Every tab panel gets the same fixed height and scrolls inside it, so
+     switching tabs or a growing diff never changes the box's height. */
+  .gs-panel:not([hidden]) { height: 380px; overflow-y: auto; }
+  .gs-diff, .gs-graph-scroll { max-height: none; }
+
+  /* Reserve room for the done-note up front, so completing the last task
+     does not push the panels down. Tune to your checklist's size. */
+  .gs-tasks:not(:empty) { min-height: 230px; }
 </style>
 </head>
 <body>
-
-<!--
-  The same widget outside Quarto: drop these three files next to your page and
-  add a container div plus a mount call. Useful if your platform will take an
-  iframe or a raw HTML block but not a full Quarto document.
-
-  This is the same "A tour of the git box" exercise that opens example.qmd.
-  The `when:` language works here too (it is compiled in the browser at mount
-  time), and `seed` can be the same block of commands; task text is HTML
-  instead of Markdown, and option names are camelCase. Copy the three files
-  out of _extensions/git-sandbox/resources/ to use this anywhere.
--->
 
 <div class="git-sandbox" id="anatomy">
   <div class="gs-loading">Loading the Git sandbox…</div>
