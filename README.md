@@ -15,6 +15,8 @@ including realistic rejected pushes when the remote is ahead.
 Nothing is installed, nothing is uploaded, nothing is written to disk.
 Both repositories live in memory and disappear on reload.
 
+![An annotated git-sandbox exercise: a terminal with hint buttons, a task checklist that ticks itself, and live diagrams of the repository](images/sandbox-tour.png)
+
 ```markdown
 ```git-sandbox
 title: Your first commit
@@ -223,7 +225,7 @@ refs appear in the local graph after a fetch, and a non-fast-forward push is
 rejected with `(fetch first)`.
 
 Up arrow recalls previous commands. **Undo** (the button, or typing `undo`)
-takes back the last state-changing command as if it was never typed — repo,
+takes back the last state-changing command as if it was never typed: repo,
 checklist, history and terminal all rewind together, up to 20 steps. Like
 `rewind`, it is a sandbox affordance, not a git command; it exists so a
 wrong turn costs one keystroke instead of a restart. **Reset** returns the

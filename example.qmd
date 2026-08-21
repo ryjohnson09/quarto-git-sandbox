@@ -34,7 +34,11 @@ reference, see the
 
 ## Reading a git box
 
-Before writing exercises, know what your learners are looking at. A git box
+Before writing exercises, know what your learners are looking at.
+
+![](images/sandbox-tour.png)
+
+A git box
 is a stack. At the top, a **terminal**: the prompt shows the folder
 and, once a repository exists, the current branch. Learners type commands
 and press Enter; the **Try:** buttons under the input fill in a command so
@@ -44,15 +48,15 @@ lists everything the sandbox supports.
 Directly under the terminal sits **Your turn**, the task checklist you
 author. Tasks tick themselves when their condition becomes true (a
 just-completed task flashes green so it registers while eyes are on the
-terminal). **Undo** takes back the last state-changing command — repo,
-checklist and terminal rewind together, so experimenting is cheap — and
+terminal). **Undo** takes back the last state-changing command: repo,
+checklist and terminal rewind together, so experimenting is cheap.
 **Reset** returns the box to its starting state.
 
 Below the checklist, a tabbed panel re-renders after *every* command. One
 tab shows at a time; the others fold behind a live badge, where a count
 means "something here" and a green check means clean or in sync. The
-active tab follows the last command — `git add` shows Files, `git commit`
-shows History — and clicking a tab holds it until the next command with an
+active tab follows the last command (`git add` shows Files, `git commit`
+shows History), and clicking a tab holds it until the next command with an
 opinion.
 
 - **Files**: the working directory / staging area / repository diagram.
@@ -214,11 +218,63 @@ tasks:
     when: on main and merged docs into main
 ```
 
-The conditions compose with `and`, `or`, `not` and parentheses. A few
-useful ones: `repo`, `clean`, `staged`, `commits >= 3`,
-`commits on docs >= 2`, `branch docs`, `on main`, `merged docs into main`,
-`merge commit`, `file SETUP.md contains "Setup"`, `ran /git\s+status/`,
-`remote`, and `pushed`.
+### The conditions, by example
+
+Every condition is a short phrase about repository state. The full table
+is in the README; these annotated examples cover the whole vocabulary:
+
+```yaml
+# Repository basics
+when: repo                     # git init has been run
+when: staged                   # something is in the staging area
+when: clean                    # nothing uncommitted or untracked
+
+# Counting commits
+when: commits >= 3             # at least three commits exist
+when: commits on docs >= 2     # at least two reachable from `docs`
+
+# Branches and merging
+when: branch docs              # a branch named `docs` exists
+when: on main                  # HEAD is currently on `main`
+when: merged docs into main    # a real merge brought `docs` into `main`
+when: merge commit             # some commit has two parents
+
+# Files and their contents
+when: file SETUP.md                    # the file exists
+when: file SETUP.md contains "Setup"   # ...and contains that text
+when: file notes.txt contains /TODO:/  # ...or matches a regex
+
+# Commands the learner typed (use sparingly; see below)
+when: ran "git status"                 # plain text matches as a substring
+when: ran /git\s+log\s+--oneline/      # regex for exact shapes
+
+# Remotes
+when: remote                   # a remote has been configured
+when: pushed                   # every local commit is on the remote
+```
+
+Conditions compose with `and`, `or`, `not` and parentheses (`and` binds
+tighter than `or`), which is where they earn their keep. Some realistic
+tasks:
+
+```yaml
+tasks:
+  # "Commit on the feature branch, not on main"
+  - text: Commit your experiment on the `spike` branch
+    when: on spike and commits on spike >= 2
+
+  # "Merge it back, however they get there" - fast-forward or merge commit
+  - text: Bring `spike` into `main`
+    when: on main and merged spike into main
+
+  # "Clean up after the merge" - the flag itself is the lesson here
+  - text: Delete the merged branch with `git branch -d spike`
+    when: not branch spike and ran /git\s+branch\s+-[dD]/
+
+  # "Ship it" - state on both sides of the push
+  - text: Publish your work
+    when: pushed and clean
+```
 
 Two habits worth adopting:
 
