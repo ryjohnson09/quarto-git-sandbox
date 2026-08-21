@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.0
+
+A layout rework so complex exercises stay one screen tall instead of a long
+scroll. No information was removed — panels folded behind tabs keep a live
+summary badge.
+
+- The four visualisation panels (Files, Changes, History, Remote) are now
+  tabs showing one panel at a time. Each tab carries a live badge: a count
+  means something is there, a green check means clean or in sync.
+- The active tab follows the last command — `git add` shows Files,
+  `git commit` shows History, `git push` shows Remote — matching where a
+  learner would look next. Clicking a tab holds it until the next command
+  with an opinion.
+- The task checklist moved from the bottom of the box to directly under the
+  terminal, so progress is visible while typing. A just-completed task
+  briefly flashes green.
+- Long diffs and deep commit graphs scroll inside their panel instead of
+  stretching the whole box.
+- The Remote tab only exists once `git remote add origin` has run, and all
+  panels print expanded (tabs are a screen affordance).
+- New `undo` command (and an Undo button next to Reset): takes back the last
+  state-changing command as if it was never typed. Repository, task ticks,
+  command history and terminal all rewind together, up to 20 steps deep.
+  Read-only commands are skipped, so undo never appears to do nothing.
+  Reset clears the undo history. Like `rewind`, undo is a sandbox
+  affordance, not a git command.
+
 ## 1.0.2
 
 - `merged X into Y` now requires a merge to have actually happened. It was an

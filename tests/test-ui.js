@@ -69,6 +69,20 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('0 of 3 to start', /0 of 3/.test(host.querySelector('.gs-tasks').textContent),
     host.querySelector('.gs-tasks').textContent);
 
+  // tabs: the panels fold into one visible at a time
+  const activeTab = () => host.querySelector('.gs-tab.is-active').getAttribute('data-tab');
+  const panel = (n) => host.querySelector('.gs-panel[data-panel="' + n + '"]');
+  const badge = (n) => host.querySelector('.gs-tab[data-tab="' + n + '"] .gs-tab-badge');
+  check('files tab active by default', activeTab() === 'files');
+  check('only the files panel is visible',
+    panel('files').hidden === false && panel('changes').hidden === true &&
+    panel('history').hidden === true && panel('remote').hidden === true);
+  check('remote tab hidden without a remote',
+    host.querySelector('.gs-tab[data-tab="remote"]').hidden === true);
+  check('tasks sit between the terminal and the panels',
+    host.querySelector('.gs-term-wrap').nextElementSibling.className.indexOf('gs-tasks') !== -1,
+    host.querySelector('.gs-body').innerHTML.slice(0, 120));
+
   const run = async (line) => { await inst.run(line); await sleep(30); };
 
   await run('git init');
@@ -113,6 +127,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('graph shows HEAD ref', /HEAD → main/.test(host.querySelector('.gs-graph').textContent),
     host.querySelector('.gs-graph').textContent);
   check('task 2 ticks', host.querySelectorAll('.gs-task.is-done').length === 2);
+  check('a just-ticked task flashes', host.querySelectorAll('.gs-task.is-just-done').length === 1,
+    host.querySelector('.gs-tasks').innerHTML);
+  check('git commit auto-switches to the history tab', activeTab() === 'history');
+  check('history badge counts commits', badge('history').textContent === '1',
+    badge('history').outerHTML);
 
   const workCol = () => host.querySelectorAll('.gs-col')[0];
   check('committed file shows as unchanged chip in working dir',
@@ -148,6 +167,45 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('all tasks done', host.querySelectorAll('.gs-task.is-done').length === 3,
     host.querySelector('.gs-tasks').textContent);
   check('done note appears', /Well done/.test(host.querySelector('.gs-tasks').textContent));
+  check('flash class is not re-applied on later renders',
+    host.querySelectorAll('.gs-task.is-just-done').length <= 1,
+    host.querySelector('.gs-tasks').innerHTML);
+  check('files badge shows clean check after merge', badge('files').textContent === '✓',
+    badge('files').outerHTML);
+  check('changes badge shows clean check', badge('changes').textContent === '✓',
+    badge('changes').outerHTML);
+  check('history badge counts all commits', badge('history').textContent === '4',
+    badge('history').outerHTML);
+
+  // manual tab click holds; a shell edit pulls focus back to files
+  host.querySelector('.gs-tab[data-tab="changes"]').dispatchEvent(new win.Event('click'));
+  check('clicking a tab selects it', activeTab() === 'changes' && panel('changes').hidden === false);
+  await run('echo "tweak" > fix.txt');
+  check('editing a file auto-switches to files', activeTab() === 'files');
+  check('files badge counts the modified file', badge('files').textContent === '1',
+    badge('files').outerHTML);
+  await run('git checkout fix.txt');
+
+  // the remote tab appears once origin exists
+  await run('git remote add origin https://example.com/demo.git');
+  check('remote tab appears with a remote',
+    host.querySelector('.gs-tab[data-tab="remote"]').hidden === false);
+  check('git remote auto-switches to the remote tab', activeTab() === 'remote');
+
+  // undo: full time travel over the last state-changing command
+  check('undo button enabled once something is undoable',
+    host.querySelector('.gs-undo').disabled === false);
+  await run('undo');
+  check('undo removes the remote again',
+    host.querySelector('.gs-tab[data-tab="remote"]').hidden === true);
+  check('undo falls back off the vanished remote tab', activeTab() === 'files');
+  check('the undone command vanishes from the terminal echo',
+    !Array.from(host.querySelectorAll('.gs-line.gs-echo'))
+      .some((l) => /remote add/.test(l.textContent)),
+    host.querySelector('.gs-out').textContent.slice(-300));
+  check('undo confirms what it undid',
+    /Undid: git remote add/.test(host.querySelector('.gs-out').textContent),
+    host.querySelector('.gs-out').textContent.slice(-200));
 
   const vb = host.querySelector('.gs-graph').getAttribute('viewBox');
   check('viewBox set', /^0 0 \d+ \d+$/.test(vb), vb);
@@ -175,6 +233,14 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   check('reset returns state pill to no repository',
     /no repository/.test(host.querySelector('.gs-state').textContent),
     host.querySelector('.gs-state').innerHTML);
+  check('reset returns to the files tab', activeTab() === 'files');
+  check('reset hides the remote tab again',
+    host.querySelector('.gs-tab[data-tab="remote"]').hidden === true);
+  check('reset empties the undo stack', host.querySelector('.gs-undo').disabled === true);
+  await run('undo');
+  check('undo with nothing to undo says so',
+    /Nothing to undo/.test(host.querySelector('.gs-out').textContent),
+    host.querySelector('.gs-out').textContent.slice(-200));
 
   // pre-init files are just files, not "untracked"
   await run('echo hi > pre.txt');
@@ -191,6 +257,16 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     /untracked/.test(workCol().textContent) &&
     workCol().querySelectorAll('.gs-chip-clean').length === 0,
     workCol().innerHTML);
+
+  // undo restores task ticks along with the repo
+  check('git init ticks the repo task again', host.querySelectorAll('.gs-task.is-done').length === 1);
+  await run('undo');
+  check('undo reverses git init', /no repository/.test(host.querySelector('.gs-state').textContent),
+    host.querySelector('.gs-state').textContent);
+  check('undo unticks the task git init had ticked',
+    host.querySelectorAll('.gs-task.is-done').length === 0,
+    host.querySelector('.gs-tasks').textContent);
+  await run('git init');
   await run('echo a > a.txt'); await run('git add .'); await run('git commit -m "Add the project README"');
   await run('echo b > b.txt'); await run('git add .'); await run('git commit -m "Set up the data folder"');
   await run('git checkout -b analysis');

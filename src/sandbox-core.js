@@ -1148,6 +1148,71 @@
       }
     }
 
+    /* ------------------------- undo snapshots ------------------------ */
+
+    // Everything a command can change lives in the in-memory store (working
+    // files, .git, the bare mock remote) plus a few closure variables, so a
+    // full state snapshot is a clone of both. Repos here are a few KB, so
+    // cloning per command is cheap.
+    function cloneStore(src) {
+      var out = new Map();
+      src.forEach(function (node, key) {
+        var copy = {};
+        for (var k in node) copy[k] = node[k];
+        if (node.content instanceof Uint8Array) copy.content = new Uint8Array(node.content);
+        out.set(key, copy);
+      });
+      return out;
+    }
+
+    function snapshot() {
+      return {
+        store: cloneStore(fs._store),
+        remoteUrl: remoteUrl,
+        upstreams: JSON.parse(JSON.stringify(upstreams)),
+        merges: mergesDone.map(function (m) { return { from: m.from, into: m.into }; }),
+        author: { name: author.name, email: author.email },
+        repoReady: repoReady
+      };
+    }
+
+    function restore(snap) {
+      var cloned = cloneStore(snap.store);
+      // mutate the existing store so every closure holding `fs` stays valid
+      fs._store.clear();
+      cloned.forEach(function (v, k) { fs._store.set(k, v); });
+      remoteUrl = snap.remoteUrl;
+      upstreams = JSON.parse(JSON.stringify(snap.upstreams));
+      mergesDone = snap.merges.map(function (m) { return { from: m.from, into: m.into }; });
+      author = { name: snap.author.name, email: snap.author.email };
+      repoReady = snap.repoReady;
+    }
+
+    // Did anything meaningful change since the snapshot? Compares content,
+    // not mtimes, so rewriting a file with identical bytes does not count.
+    function changedSince(snap) {
+      if (remoteUrl !== snap.remoteUrl) return true;
+      if (mergesDone.length !== snap.merges.length) return true;
+      if (JSON.stringify(upstreams) !== JSON.stringify(snap.upstreams)) return true;
+      if (author.name !== snap.author.name || author.email !== snap.author.email) return true;
+      if (fs._store.size !== snap.store.size) return true;
+      var diff = false;
+      fs._store.forEach(function (node, key) {
+        if (diff) return;
+        var old = snap.store.get(key);
+        if (!old || old.type !== node.type) { diff = true; return; }
+        var a = node.content, b = old.content;
+        if (!a !== !b) { diff = true; return; }
+        if (a && b) {
+          if (a.length !== b.length) { diff = true; return; }
+          for (var i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) { diff = true; return; }
+          }
+        }
+      });
+      return diff;
+    }
+
     async function reset(seed) {
       fs = createMemFS();
       base.fs = fs;
@@ -1163,6 +1228,9 @@
     var api = {
       run: run,
       reset: reset,
+      snapshot: snapshot,
+      restore: restore,
+      changedSince: changedSince,
       graphModel: graphModel,
       statusModel: statusModel,
       diffModel: diffModel,

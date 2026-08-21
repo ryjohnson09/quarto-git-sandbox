@@ -75,7 +75,7 @@
 .gs-state-repo  { background: var(--gs-blue-50); color: var(--gs-blue-500); }
 .gs-state-remote { background: #DBE6D3; color: #394D27; }
 
-.gs-reset {
+.gs-reset, .gs-undo {
   font-family: var(--gs-mono);
   font-size: 12px;
   font-weight: 400;
@@ -89,8 +89,10 @@
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.gs-reset:hover { background: var(--gs-blue); color: #FFFFFF; border-color: var(--gs-blue); }
-.gs-reset:focus-visible { outline: 3px solid rgba(50, 118, 181, 0.45); outline-offset: 2px; }
+.gs-reset:hover, .gs-undo:hover:not(:disabled) { background: var(--gs-blue); color: #FFFFFF; border-color: var(--gs-blue); }
+.gs-reset:focus-visible, .gs-undo:focus-visible { outline: 3px solid rgba(50, 118, 181, 0.45); outline-offset: 2px; }
+/* nothing on the stack yet */
+.gs-undo:disabled { opacity: 0.45; cursor: default; }
 
 /* -------------------------------- body ------------------------------- */
 
@@ -203,15 +205,52 @@
   min-width: 0;
 }
 
-.gs-viz-h {
+/* One panel shows at a time; the tab row replaces the stacked section
+   headers. Badges keep the folded panels legible: a count means "something
+   here", a green check means clean/in-sync. */
+.gs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--gs-blue-50);
+}
+.gs-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-family: var(--gs-mono);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--gs-gray-body);
-  margin: 4px 0 10px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px 7px;
+  margin-bottom: -1px;
+  cursor: pointer;
 }
-.gs-viz-h + * + .gs-viz-h { margin-top: 20px; }
+/* display:inline-flex above would defeat the UA's [hidden] rule */
+.gs-tab[hidden], .gs-tab-badge[hidden] { display: none; }
+.gs-tab:hover { color: var(--gs-blue-500); }
+.gs-tab:focus-visible { outline: 3px solid rgba(50, 118, 181, 0.45); outline-offset: -3px; }
+.gs-tab.is-active {
+  color: var(--gs-blue-500);
+  border-bottom-color: var(--gs-blue);
+}
+.gs-tab-badge {
+  font-size: 10px;
+  letter-spacing: 0;
+  line-height: 1;
+  background: var(--gs-blue-50);
+  color: var(--gs-blue-500);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+.gs-tab-badge-ok { background: #DBE6D3; color: #394D27; }
+
+.gs-panel { min-width: 0; }
 
 /* stages */
 
@@ -299,6 +338,9 @@
 
 /* changes (diff panel) */
 
+/* Long diffs scroll inside the panel instead of stretching the box. */
+.gs-diff { max-height: 320px; overflow-y: auto; }
+
 .gs-diff-empty { font-size: 13px; color: var(--gs-gray-body); }
 .gs-diff-empty code { font-family: var(--gs-mono); font-size: 12px; }
 
@@ -349,7 +391,8 @@
 
 /* graph */
 
-.gs-graph-scroll { overflow-x: hidden; }
+/* Deep histories scroll inside the panel instead of stretching the box. */
+.gs-graph-scroll { overflow-x: hidden; max-height: 360px; overflow-y: auto; }
 .gs-graph { display: block; width: 100%; }
 .gs-sha  { font-family: var(--gs-mono); font-size: 12px; fill: var(--gs-gray-body); }
 .gs-msg  { font-family: var(--gs-font); font-size: 13px; fill: var(--gs-gray); }
@@ -357,13 +400,8 @@
 .gs-ref-head { fill: #FFFFFF; }
 .gs-ref-remote { fill: var(--gs-gray-body); }
 
-/* remote (mock origin) */
+/* remote (mock origin) — its own tab, so no divider needed */
 
-.gs-remote {
-  margin-top: 20px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--gs-blue-100);
-}
 .gs-remote-sync { font-size: 12px; color: var(--gs-gray-body); margin-top: 2px; }
 .gs-remote-sync code { font-family: var(--gs-mono); font-size: 11px; }
 .gs-empty-text { font-family: var(--gs-font); font-size: 13px; fill: var(--gs-gray-body); }
@@ -410,6 +448,13 @@
   background: #55733A;
   border-color: #55733A;
   color: #FFFFFF;
+}
+/* A just-completed task flashes so the tick registers while the learner's
+   eye is still on the terminal above. */
+.gs-task.is-just-done { animation: gs-task-flash 1.2s ease-out; }
+@keyframes gs-task-flash {
+  0%   { background: #DBE6D3; }
+  100% { background: transparent; }
 }
 .gs-task.is-done .gs-task-txt { color: var(--gs-gray-body); }
 .gs-task code {
@@ -458,7 +503,10 @@
 
 @media print {
   .gs-term-wrap, .gs-viz { break-inside: avoid; }
-  .gs-input-row, .gs-hints, .gs-reset { display: none; }
+  .gs-input-row, .gs-hints, .gs-reset, .gs-undo, .gs-tabs { display: none; }
+  /* On paper there are no tabs to click, so print every panel. */
+  .gs-panel[hidden] { display: block; }
+  .gs-diff, .gs-graph-scroll { max-height: none; overflow: visible; }
   .gs::after {
     content: "This exercise is interactive. Open the lesson in a browser to use it.";
     display: block;

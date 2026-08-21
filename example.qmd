@@ -41,21 +41,31 @@ and press Enter; the **Try:** buttons under the input fill in a command so
 nobody is stuck guessing syntax; the up arrow recalls history, and `help`
 lists everything the sandbox supports.
 
-Below the terminal, three panels that re-render after *every* command:
+Directly under the terminal sits **Your turn**, the task checklist you
+author. Tasks tick themselves when their condition becomes true (a
+just-completed task flashes green so it registers while eyes are on the
+terminal). **Undo** takes back the last state-changing command — repo,
+checklist and terminal rewind together, so experimenting is cheap — and
+**Reset** returns the box to its starting state.
 
-- **Where your work lives**: the working directory / staging area /
-  repository diagram. Files appear as chips and move from one area to the
-  next as they are edited, staged, and committed. This is the mental model
-  that makes Git click.
-- **Changes since last commit**: a live diff. Edited files show green
+Below the checklist, a tabbed panel re-renders after *every* command. One
+tab shows at a time; the others fold behind a live badge, where a count
+means "something here" and a green check means clean or in sync. The
+active tab follows the last command — `git add` shows Files, `git commit`
+shows History — and clicking a tab holds it until the next command with an
+opinion.
+
+- **Files**: the working directory / staging area / repository diagram.
+  Files appear as chips and move from one area to the next as they are
+  edited, staged, and committed. This is the mental model that makes Git
+  click.
+- **Changes**: a live diff since the last commit. Edited files show green
   `+` and red `-` lines; new files are all additions, deleted files all
   removals. It answers "what would I be committing right now?"
-- **Commit history**: the graph. Branches get lanes, `HEAD` and branch
+- **History**: the graph. Branches get lanes, `HEAD` and branch
   pills mark the tips, merge commits are hollow circles.
-
-Below everything sits **Your turn**, the task checklist you author. Tasks
-tick themselves when their condition becomes true, and **Reset** returns
-the box to its starting state.
+- **Remote**: appears only once a remote exists, with the origin's own
+  graph and an in-sync/ahead/behind summary.
 
 Try it: this box is seeded with two commits so every panel has something
 to show:
@@ -284,8 +294,8 @@ the seed, so learners always return to the exact state you designed.
 ## Flow: a remote, push and pull
 
 `git remote add origin <url>` in a seed creates a **mock remote**, a
-second repository inside the page, and reveals the *Remote (origin)*
-panel, drawn as its own commit graph with an in-sync/ahead/behind summary.
+second repository inside the page, and reveals the *Remote*
+tab, drawn as its own commit graph with an in-sync/ahead/behind summary.
 Push, fetch, and pull behave like the real thing, including rejected
 non-fast-forward pushes.
 
@@ -300,7 +310,7 @@ title: Pull, work, push
 prompt: "~/sales-analysis $"
 intro: |
   While you were away, a colleague pushed a commit to the shared repository.
-  Compare {y}Commit history{/} with {y}Remote (origin){/}: the remote is ahead.
+  Compare the {y}History{/} tab with the {y}Remote{/} tab: the remote is ahead.
   (Try {y}git push{/} first if you want to see what a rejected push looks like.)
 hints: [git fetch, git pull, git log --oneline, 'echo "sales <- read_csv(\"sales.csv\")" > load.R', git add ., 'git commit -m "Load the sales data"', git push]
 done-note: Pull, work, push, and the two graphs agree again. The rewind trick in the seed is what made the remote start out ahead.

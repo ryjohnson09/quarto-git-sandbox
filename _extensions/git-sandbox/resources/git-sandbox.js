@@ -1158,6 +1158,71 @@
       }
     }
 
+    /* ------------------------- undo snapshots ------------------------ */
+
+    // Everything a command can change lives in the in-memory store (working
+    // files, .git, the bare mock remote) plus a few closure variables, so a
+    // full state snapshot is a clone of both. Repos here are a few KB, so
+    // cloning per command is cheap.
+    function cloneStore(src) {
+      var out = new Map();
+      src.forEach(function (node, key) {
+        var copy = {};
+        for (var k in node) copy[k] = node[k];
+        if (node.content instanceof Uint8Array) copy.content = new Uint8Array(node.content);
+        out.set(key, copy);
+      });
+      return out;
+    }
+
+    function snapshot() {
+      return {
+        store: cloneStore(fs._store),
+        remoteUrl: remoteUrl,
+        upstreams: JSON.parse(JSON.stringify(upstreams)),
+        merges: mergesDone.map(function (m) { return { from: m.from, into: m.into }; }),
+        author: { name: author.name, email: author.email },
+        repoReady: repoReady
+      };
+    }
+
+    function restore(snap) {
+      var cloned = cloneStore(snap.store);
+      // mutate the existing store so every closure holding `fs` stays valid
+      fs._store.clear();
+      cloned.forEach(function (v, k) { fs._store.set(k, v); });
+      remoteUrl = snap.remoteUrl;
+      upstreams = JSON.parse(JSON.stringify(snap.upstreams));
+      mergesDone = snap.merges.map(function (m) { return { from: m.from, into: m.into }; });
+      author = { name: snap.author.name, email: snap.author.email };
+      repoReady = snap.repoReady;
+    }
+
+    // Did anything meaningful change since the snapshot? Compares content,
+    // not mtimes, so rewriting a file with identical bytes does not count.
+    function changedSince(snap) {
+      if (remoteUrl !== snap.remoteUrl) return true;
+      if (mergesDone.length !== snap.merges.length) return true;
+      if (JSON.stringify(upstreams) !== JSON.stringify(snap.upstreams)) return true;
+      if (author.name !== snap.author.name || author.email !== snap.author.email) return true;
+      if (fs._store.size !== snap.store.size) return true;
+      var diff = false;
+      fs._store.forEach(function (node, key) {
+        if (diff) return;
+        var old = snap.store.get(key);
+        if (!old || old.type !== node.type) { diff = true; return; }
+        var a = node.content, b = old.content;
+        if (!a !== !b) { diff = true; return; }
+        if (a && b) {
+          if (a.length !== b.length) { diff = true; return; }
+          for (var i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) { diff = true; return; }
+          }
+        }
+      });
+      return diff;
+    }
+
     async function reset(seed) {
       fs = createMemFS();
       base.fs = fs;
@@ -1173,6 +1238,9 @@
     var api = {
       run: run,
       reset: reset,
+      snapshot: snapshot,
+      restore: restore,
+      changedSince: changedSince,
       graphModel: graphModel,
       statusModel: statusModel,
       diffModel: diffModel,
@@ -1953,6 +2021,7 @@
       '<div class="gs-head">' +
         '<span class="gs-eyebrow">' + esc(config.title || 'Git sandbox') + '</span>' +
         '<span class="gs-state" role="status"></span>' +
+        '<button type="button" class="gs-undo" disabled>Undo</button>' +
         '<button type="button" class="gs-reset">Reset</button>' +
       '</div>' +
       '<div class="gs-body">' +
@@ -1966,21 +2035,33 @@
           '</form>' +
           '<div class="gs-hints"></div>' +
         '</div>' +
+        '<div class="gs-tasks"></div>' +
         '<div class="gs-viz">' +
-          '<div class="gs-viz-h">Where your work lives</div>' +
-          '<div class="gs-stages"></div>' +
-          '<div class="gs-viz-h">Changes since last commit</div>' +
-          '<div class="gs-diff"></div>' +
-          '<div class="gs-viz-h">Commit history</div>' +
-          '<div class="gs-graph-scroll"><svg class="gs-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
-          '<div class="gs-remote" hidden>' +
-            '<div class="gs-viz-h">Remote (origin)</div>' +
-            '<div class="gs-graph-scroll"><svg class="gs-remote-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
-            '<div class="gs-remote-sync"></div>' +
+          // One panel at a time; each tab carries a live badge so the folded
+          // panels still tell you what they hold at a glance.
+          '<div class="gs-tabs" role="tablist" aria-label="Repository views">' +
+            '<button type="button" class="gs-tab is-active" role="tab" aria-selected="true" data-tab="files">Files<span class="gs-tab-badge" hidden></span></button>' +
+            '<button type="button" class="gs-tab" role="tab" aria-selected="false" data-tab="changes">Changes<span class="gs-tab-badge" hidden></span></button>' +
+            '<button type="button" class="gs-tab" role="tab" aria-selected="false" data-tab="history">History<span class="gs-tab-badge" hidden></span></button>' +
+            '<button type="button" class="gs-tab" role="tab" aria-selected="false" data-tab="remote" hidden>Remote<span class="gs-tab-badge" hidden></span></button>' +
           '</div>' +
+          '<section class="gs-panel" role="tabpanel" data-panel="files">' +
+            '<div class="gs-stages"></div>' +
+          '</section>' +
+          '<section class="gs-panel" role="tabpanel" data-panel="changes" hidden>' +
+            '<div class="gs-diff"></div>' +
+          '</section>' +
+          '<section class="gs-panel" role="tabpanel" data-panel="history" hidden>' +
+            '<div class="gs-graph-scroll"><svg class="gs-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
+          '</section>' +
+          '<section class="gs-panel" role="tabpanel" data-panel="remote" hidden>' +
+            '<div class="gs-remote" hidden>' +
+              '<div class="gs-graph-scroll"><svg class="gs-remote-graph" xmlns="http://www.w3.org/2000/svg"></svg></div>' +
+              '<div class="gs-remote-sync"></div>' +
+            '</div>' +
+          '</section>' +
         '</div>' +
-      '</div>' +
-      '<div class="gs-tasks"></div>';
+      '</div>';
 
     var out = host.querySelector('.gs-out');
     var form = host.querySelector('.gs-input-row');
@@ -1995,7 +2076,93 @@
     var tasksNode = host.querySelector('.gs-tasks');
     var stateNode = host.querySelector('.gs-state');
     var resetBtn = host.querySelector('.gs-reset');
+    var undoBtn = host.querySelector('.gs-undo');
     var lastStateHtml = '';
+
+    // Undo is full time travel: each entry restores the repo, the task
+    // ticks, the command history and the terminal together, so the undone
+    // command leaves no trace anywhere. Only commands that actually changed
+    // state get an entry, so `undo` never appears to do nothing.
+    var undoStack = [];
+    var UNDO_DEPTH = 20;
+
+    function captureUndo(line) {
+      return {
+        line: line,
+        core: sb.snapshot(),
+        outHtml: out.innerHTML,
+        prompt: host.querySelector('.gs-prompt').textContent,
+        histLen: history.length,
+        done: tasks.map(function (t) { return !!t._done; })
+      };
+    }
+
+    function doUndo() {
+      var entry = undoStack.pop();
+      if (!entry) {
+        write('<span class="gs-echo-prompt">' +
+          esc(host.querySelector('.gs-prompt').textContent) + '</span> undo', 'gs-echo');
+        writeText('Nothing to undo.');
+        return;
+      }
+      sb.restore(entry.core);
+      out.innerHTML = entry.outHtml;
+      history.length = entry.histLen;
+      histIdx = history.length;
+      tasks.forEach(function (t, i) { t._done = entry.done[i]; t._wasDone = entry.done[i]; });
+      write('<span class="gs-echo-prompt">' + esc(entry.prompt) + '</span> undo', 'gs-echo');
+      writeText('Undid: {y}' + entry.line + '{/}');
+    }
+
+    /* ------------------------------ tabs ------------------------------ */
+
+    var tabButtons = {};
+    var tabPanels = {};
+    host.querySelectorAll('.gs-tab').forEach(function (b) { tabButtons[b.getAttribute('data-tab')] = b; });
+    host.querySelectorAll('.gs-panel').forEach(function (p) { tabPanels[p.getAttribute('data-panel')] = p; });
+    var activeTab = 'files';
+
+    function selectTab(name) {
+      if (!tabButtons[name] || tabButtons[name].hidden) return;
+      activeTab = name;
+      Object.keys(tabButtons).forEach(function (k) {
+        var on = k === name;
+        tabButtons[k].classList.toggle('is-active', on);
+        tabButtons[k].setAttribute('aria-selected', on ? 'true' : 'false');
+        tabPanels[k].hidden = !on;
+      });
+      // A graph drawn while its panel was hidden used the fallback width;
+      // now that it has a real width, redraw at it.
+      redrawGraph();
+    }
+
+    Object.keys(tabButtons).forEach(function (k) {
+      tabButtons[k].addEventListener('click', function () { selectTab(k); });
+    });
+
+    function setBadge(name, text) {
+      var badge = tabButtons[name].querySelector('.gs-tab-badge');
+      badge.hidden = !text;
+      badge.textContent = text || '';
+      badge.classList.toggle('gs-tab-badge-ok', text === '✓');
+    }
+
+    // Which tab would a learner look at after this command? Mirrors the
+    // glance they'd make anyway; a manual tab click holds until the next
+    // command that has an opinion.
+    function tabFor(line) {
+      var t = line.trim().split(/\s+/);
+      var c = t[0], s = t[1] || '';
+      if (c === 'git') {
+        if (/^(init|add|rm|status|restore|mv)$/.test(s)) return 'files';
+        if (s === 'diff') return 'changes';
+        if (/^(commit|merge|log|branch|checkout|switch)$/.test(s)) return 'history';
+        if (/^(push|pull|fetch|remote)$/.test(s)) return 'remote';
+        return null;
+      }
+      if (/^(echo|touch|rm|mkdir)$/.test(c)) return 'files';
+      return null;
+    }
 
     // The graph is drawn at the SVG's current pixel width, so a later resize
     // would scale it like an image (tiny text on narrow screens). Redraw the
@@ -2056,7 +2223,11 @@
         }
         var ok = !!t._done;
         if (ok) done++;
-        return '<li class="gs-task' + (ok ? ' is-done' : '') + '">' +
+        // A task that ticked on this render gets a brief highlight, so the
+        // completion registers even while the eye is on the terminal.
+        var fresh = ok && !t._wasDone;
+        t._wasDone = ok;
+        return '<li class="gs-task' + (ok ? ' is-done' : '') + (fresh ? ' is-just-done' : '') + '">' +
                '<span class="gs-task-mark" aria-hidden="true">' + (ok ? '✓' : '') + '</span>' +
                '<span class="gs-task-txt">' + t.text + '</span></li>';
       }).join('');
@@ -2075,8 +2246,9 @@
       var status = isRepo ? await sb.statusModel()
         : { staged: [], modified: [], untracked: [], deleted: [], stagedDeleted: [] };
       var files = await sb.listFiles();
+      var diff = await sb.diffModel();
       renderStages(stagesNode, status, graph, files, isRepo);
-      renderDiff(diffNode, await sb.diffModel());
+      renderDiff(diffNode, diff);
       renderGraph(svg, graph);
       lastGraph = graph;
       lastGraphW = svg.clientWidth;
@@ -2092,6 +2264,25 @@
         remoteWrap.hidden = true;
         lastRemoteGraph = null;
         remoteSync.innerHTML = '';
+      }
+
+      // Tab badges: enough signal that folded panels lose nothing you would
+      // catch at a glance. A count means "something here"; ✓ means clean.
+      var changed = status.untracked.length + status.modified.length +
+        status.deleted.length + status.staged.length + status.stagedDeleted.length;
+      setBadge('files', isRepo ? (changed ? String(changed) : '✓')
+        : (files.length ? String(files.length) : ''));
+      setBadge('changes', !isRepo ? '' : (diff && diff.files.length ? String(diff.files.length) : '✓'));
+      setBadge('history', graph.commits.length ? String(graph.commits.length) : '');
+      tabButtons.remote.hidden = !remote;
+      if (remote) {
+        setBadge('remote', !remote.tracked ? ''
+          : (!remote.ahead && !remote.behind) ? '✓'
+          : ((remote.ahead ? '⇡' + remote.ahead : '') +
+             (remote.ahead && remote.behind ? ' ' : '') +
+             (remote.behind ? '⇣' + remote.behind : '')));
+      } else if (activeTab === 'remote') {
+        selectTab('files');
       }
 
       var stateHtml = !isRepo
@@ -2128,6 +2319,8 @@
       }
       renderTasks();
 
+      undoBtn.disabled = !undoStack.length;
+
       var br = graph.head;
       var promptText = (config.prompt || '~/project') .replace(/\s*\$\s*$/, '');
       host.querySelector('.gs-prompt').textContent =
@@ -2138,15 +2331,34 @@
       if (busy) return;
       busy = true;
       input.disabled = true;
+      var trimmed = line.trim();
+      if (trimmed === 'undo') {
+        // never reaches the engine: undo is a sandbox affordance, not git
+        doUndo();
+        await refresh();
+        input.disabled = false;
+        busy = false;
+        input.focus();
+        return;
+      }
+      var snap = captureUndo(line);
       write('<span class="gs-echo-prompt">' + esc(host.querySelector('.gs-prompt').textContent) + '</span> ' + esc(line), 'gs-echo');
       history.push(line);
       histIdx = history.length;
       var r = await sb.run(line);
-      if (line.trim() === 'clear') { out.innerHTML = ''; }
-      else if (line.trim() === 'help') { writeText(helpText()); }
-      else if (line.trim() === 'reset') { await doReset(); }
+      if (trimmed === 'clear') { out.innerHTML = ''; }
+      else if (trimmed === 'help') { writeText(helpText()); }
+      else if (trimmed === 'reset') { await doReset(); }
       else { writeText(r.out, r.ok ? '' : 'gs-err'); }
+      if (r.ok && trimmed !== 'reset' && sb.changedSince(snap.core)) {
+        undoStack.push(snap);
+        if (undoStack.length > UNDO_DEPTH) undoStack.shift();
+      }
       await refresh();
+      if (r.ok) {
+        var want = tabFor(line);
+        if (want) selectTab(want);
+      }
       input.disabled = false;
       busy = false;
       input.focus();
@@ -2172,7 +2384,10 @@
         '       branch [-d], checkout [-b], switch [-c], merge, config,',
         '       remote add origin, push [-u], pull, fetch',
         '{y}shell{/}  ls, cat, echo "text" > file, echo "text" >> file, touch, rm, mkdir, pwd',
-        '{y}other{/}  help, clear, reset'
+        '{y}other{/}  help, clear, reset, undo',
+        '',
+        '{y}undo{/} takes back your last state-changing command (a sandbox',
+        'nicety, not a git command — real git has no undo).'
       ].join('\n');
     }
 
@@ -2183,7 +2398,9 @@
       // go too or they re-complete themselves on the very next refresh.
       history.length = 0;
       histIdx = 0;
-      tasks.forEach(function (t) { t._done = false; });
+      undoStack.length = 0;
+      tasks.forEach(function (t) { t._done = false; t._wasDone = false; });
+      selectTab('files');
       try {
         await sb.reset(seed);
       } catch (e) {
@@ -2218,6 +2435,7 @@
     });
 
     resetBtn.addEventListener('click', function () { doReset(); });
+    undoBtn.addEventListener('click', function () { submit('undo'); });
     host.querySelector('.gs-out').addEventListener('click', function () { input.focus(); });
 
     renderHints();

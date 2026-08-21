@@ -441,6 +441,54 @@ async function scenario(name, fn) {
     check('reset clears the remote', (await sb.remoteModel()) === null);
   });
 
+  /* ---------------- snapshot / restore / changedSince ---------------- */
+  await scenario('undo snapshots', async ({ sb, run, check }) => {
+    await run('git init');
+    await run('echo one > a.txt');
+    await run('git add .');
+    await run('git commit -m "one"');
+
+    const snap = sb.snapshot();
+    check('nothing changed right after a snapshot', sb.changedSince(snap) === false);
+
+    await run('git status');
+    check('read-only command does not count as a change', sb.changedSince(snap) === false);
+
+    await run('echo two > b.txt');
+    check('writing a file counts as a change', sb.changedSince(snap) === true);
+    await run('git add b.txt');
+    await run('git commit -m "two"');
+    check('two commits before restore', (await sb.graphModel()).commits.length === 2);
+
+    sb.restore(snap);
+    check('restore rewinds the commit graph', (await sb.graphModel()).commits.length === 1);
+    check('restore removes the file', (await sb.listFiles()).indexOf('b.txt') === -1);
+    check('restored state matches the snapshot', sb.changedSince(snap) === false);
+
+    // the snapshot survives later mutation of live state (deep clone)
+    await run('echo three > c.txt');
+    sb.restore(snap);
+    check('a snapshot can be restored twice', (await sb.listFiles()).length === 1);
+
+    // remote bookkeeping travels with the snapshot
+    await run('git remote add origin https://example.com/x.git');
+    check('adding a remote counts as a change', sb.changedSince(snap) === true);
+    sb.restore(snap);
+    check('restore forgets the remote', (await sb.remoteModel()) === null);
+
+    // merge record travels with the snapshot
+    await run('git checkout -b topic');
+    await run('echo t > t.txt');
+    await run('git add .');
+    await run('git commit -m "topic"');
+    await run('git checkout main');
+    const beforeMerge = sb.snapshot();
+    await run('git merge topic');
+    check('merge recorded after merging', (await sb.graphModel()).merges.length === 1);
+    sb.restore(beforeMerge);
+    check('restore forgets the merge record', (await sb.graphModel()).merges.length === 0);
+  });
+
   /* ---------------- report ---------------- */
   console.log('\n===== TRANSCRIPT: core happy path =====');
   console.log(mainLog.join('\n'));

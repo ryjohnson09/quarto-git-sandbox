@@ -213,8 +213,8 @@ Policy. `when:` does not, which is another reason to prefer it.
 `fetch`, `pull`, `config user.name|user.email`
 
 **Shell:** `ls [-a]`, `cat`, `echo "…" > file`, `echo "…" >> file`, `touch`,
-`rm`, `mkdir`, `pwd`, `whoami`, plus `help`, `clear`, `reset`, and the
-authoring-only `rewind <n>`
+`rm`, `mkdir`, `pwd`, `whoami`, plus `help`, `clear`, `reset`, `undo`, and
+the authoring-only `rewind <n>`
 
 The remote is a bare repository elsewhere in the same in-memory filesystem.
 Push and fetch move objects and refs between the two repositories with real
@@ -222,8 +222,12 @@ semantics: the first push needs `-u origin <branch>`, `origin/*` tracking
 refs appear in the local graph after a fetch, and a non-fast-forward push is
 rejected with `(fetch first)`.
 
-Up arrow recalls previous commands. **Reset** returns the exercise to its
-seeded state.
+Up arrow recalls previous commands. **Undo** (the button, or typing `undo`)
+takes back the last state-changing command as if it was never typed — repo,
+checklist, history and terminal all rewind together, up to 20 steps. Like
+`rewind`, it is a sandbox affordance, not a git command; it exists so a
+wrong turn costs one keystroke instead of a restart. **Reset** returns the
+exercise to its seeded state and clears the undo history.
 
 ## What it does not do, on purpose
 
